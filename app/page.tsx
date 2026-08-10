@@ -1,309 +1,683 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState, useCallback } from "react";
+import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 
-export default function Home() {
-  const [orders, setOrders] = useState(644);
-  const [prompt, setPrompt] = useState('Build a 3-piece dog cleaning system under $12 landed');
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "700"],
+  variable: "--font-display",
+});
+const body = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-body",
+});
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-mono",
+});
+
+// ---------------------------------------------------------------------------
+// Types — mirrors app/api/generate-bundle/route.ts's response schema exactly
+// ---------------------------------------------------------------------------
+
+type Source = "cjdropshipping" | "aliexpress" | "autods";
+type PlatformState = "ok" | "skipped_no_key" | "failed";
+
+interface Product {
+  source: Source;
+  title: string;
+  imageUrl: string;
+  factoryPrice: number | null;
+  currency: string;
+  shippingCost: number | null;
+  stock: number | null;
+  supplierName: string | null;
+  productUrl: string | null;
+}
+
+interface Financials {
+  totalFactoryCost: number;
+  totalLandedCost: number;
+  suggestedRetailPrice: number;
+  grossProfit: number;
+  grossMarginPercent: number;
+}
+
+interface BundleResponse {
+  prompt: string;
+  products: Product[];
+  financials: Financials | null;
+  platformStatus: Record<Source, PlatformState>;
+  warnings: string[];
+  generatedAt: string;
+}
+
+const COUNTRIES = [
+  { code: "US", label: "United States" },
+  { code: "TR", label: "Türkiye" },
+  { code: "DE", label: "Germany" },
+  { code: "GB", label: "United Kingdom" },
+  { code: "FR", label: "France" },
+  { code: "CA", label: "Canada" },
+];
+
+const SOURCE_META: Record<Source, { label: string; stamp: string }> = {
+  cjdropshipping: { label: "CJ Dropshipping", stamp: "CJ" },
+  aliexpress: { label: "AliExpress", stamp: "AE" },
+  autods: { label: "AutoDS", stamp: "AD" },
+};
+
+const PLATFORM_ORDER: Source[] = ["cjdropshipping", "aliexpress", "autods"];
+
+function formatMoney(value: number | null, currency: string = "USD") {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(value);
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export default function Page() {
+  const [prompt, setPrompt] = useState("");
+  const [country, setCountry] = useState("US");
   const [loading, setLoading] = useState(false);
-  const [processingImages, setProcessingImages] = useState(false);
-  const [pushingShopify, setPushingShopify] = useState(false);
-  const [studioResult, setStudioResult] = useState<any>(null);
+  const [bundle, setBundle] = useState<BundleResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [bundleData, setBundleData] = useState<any>({
-    bundleTitle: "BUILD A 3-PIECE DOG CLEANING SYSTEM UNDER $12 LANDED",
-    components: [
-      { id: "sku-1", name: "Silicone Paw Cleaner Cup", supplier: "Shenzhen Factory A", rawCost: 3.20, stock: "14,500 units" },
-      { id: "sku-2", name: "Bath Massage Brush", supplier: "Ningbo Goods Ltd", rawCost: 1.80, stock: "8,200 units" },
-      { id: "sku-3", name: "Microfiber Drying Towel", supplier: "Yiwu Textile Co", rawCost: 1.90, stock: "22,000 units" }
-    ],
-    financials: {
-      totalLandedCost: 10.90,
-      suggestedRetail: 44.99,
-      grossProfit: 34.09,
-      grossMarginPercentage: 75.8
-    }
-  });
+  const [assetUrl, setAssetUrl] = useState<string | null>(null);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetError, setAssetError] = useState<string | null>(null);
 
-  const singleProfit = Math.round(orders * 12);
-  const bundleProfit = Math.round(orders * 34);
-
-  // 1. DİNAMİK GÖRSEL ÇEKİCİ (POLLINATIONS AI - UNBOUND CACHE)
-  const fetchStudioImage = async (components: any, currentPrompt: string) => {
-    setProcessingImages(true);
-    try {
-      const res = await fetch('/api/process-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ components, prompt: currentPrompt }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setStudioResult(data);
+  const requestBundleVisual = useCallback(
+    async (products: Product[], searchPrompt: string) => {
+      setAssetLoading(true);
+      setAssetError(null);
+      setAssetUrl(null);
+      try {
+        const res = await fetch("/api/process-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: searchPrompt, products }),
+        });
+        if (!res.ok) throw new Error(`Image asset request failed (${res.status})`);
+        const data = await res.json();
+        const url: string | undefined = data?.imageUrl ?? data?.url;
+        if (!url) throw new Error("Response did not include an image URL");
+        setAssetUrl(url);
+      } catch (err) {
+        setAssetError(
+          err instanceof Error ? err.message : "Could not render the bundle visual."
+        );
+      } finally {
+        setAssetLoading(false);
       }
-    } catch (err) {
-      console.error("Studio Processing Error:", err);
-    }
-    setProcessingImages(false);
-  };
+    },
+    []
+  );
 
-  // 2. OTOMATİK DİNAMİK ARAMA VE GÖRSEL YENİLEME
-  const handleSource = async (e: any) => {
-    e.preventDefault();
-    if (!prompt.trim()) return;
+  const runSearch = useCallback(async () => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
 
     setLoading(true);
-    setStudioResult(null);
+    setError(null);
+    setBundle(null);
+    setAssetUrl(null);
+    setAssetError(null);
 
     try {
-      const res = await fetch('/api/generate-bundle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+      const res = await fetch("/api/generate-bundle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: trimmed, destinationCountry: country }),
       });
-      const data = await res.json();
 
-      if (data.success) {
-        setBundleData(data);
-        // Ürün verileri gelir gelmez anında o konuya özel CANLI STÜDYO GÖRSELİ de üretilir
-        fetchStudioImage(data.components, prompt);
+      const data: BundleResponse = await res.json();
+
+      if (!res.ok) {
+        throw new Error((data as any)?.error ?? `Search failed (${res.status})`);
+      }
+
+      setBundle(data);
+
+      if (data.products.length > 0) {
+        void requestBundleVisual(data.products, trimmed);
       }
     } catch (err) {
-      console.error("Sourcing Error:", err);
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
-
-  // 3. MANUEL GÖRSEL YENİLEME
-  const handleProcessStudio = () => {
-    if (bundleData) {
-      fetchStudioImage(bundleData.components, prompt);
-    }
-  };
-
-  // 4. SHOPIFY PUSH ENGINE
-  const handlePushShopify = async () => {
-    if (!bundleData) return;
-    setPushingShopify(true);
-
-    try {
-      const res = await fetch('/api/push-to-shopify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bundleData }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('🚀 SUCCESS! ' + bundleData.bundleTitle + ' is now live on your Shopify store as a Virtual SKU!');
-      }
-    } catch (err) {
-      console.error("Shopify Push Error:", err);
-    }
-    setPushingShopify(false);
-  };
+  }, [prompt, country, requestBundleVisual]);
 
   return (
-    <div style={{ background: '#090B10', color: '#F3F4F6', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif', paddingBottom: '120px' }}>
-      
-      {/* NAVBAR */}
-      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 8%', maxWidth: '1200px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#38BDF8', letterSpacing: '-0.5px' }}>
-          BundleOS
-        </h1>
-        <button style={{ background: '#3B82F6', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '20px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
-          VIP Beta ($29)
-        </button>
-      </nav>
+    <div
+      className={`${display.variable} ${body.variable} ${mono.variable} min-h-screen`}
+      style={{ background: "#F2ECDD", fontFamily: "var(--font-body)" }}
+    >
+      <div className="mx-auto max-w-6xl px-6 py-10 sm:px-10">
+        <Header />
 
-      <main style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px 20px' }}>
-        
-        {/* HERO SECTION */}
-        <div style={{ textAlign: 'center', padding: '40px 0 60px' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(56, 189, 248, 0.1)', color: '#38BDF8', padding: '8px 16px', borderRadius: '30px', fontSize: '13px', border: '1px solid rgba(56, 189, 248, 0.2)', marginBottom: '24px' }}>
-            ⚡ Next-Gen E-Commerce Automation Engine
-          </div>
-          <h1 style={{ fontSize: '52px', fontWeight: '800', lineHeight: '1.15', letterSpacing: '-1.5px', marginBottom: '20px' }}>
-            Turn Single Products into <br />
-            <span style={{ background: 'linear-gradient(135deg, #38BDF8, #818CF8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              High-Margin AI Bundle Systems
-            </span>
-          </h1>
-          <p style={{ fontSize: '18px', color: '#9CA3AF', maxWidth: '680px', margin: '0 auto 36px', lineHeight: '1.6' }}>
-            Source multi-component systems, generate studio-grade AI visuals, and push virtual SKUs straight to your Shopify store in seconds.
-          </p>
-          <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <a href="#console" style={{ background: '#3B82F6', color: 'white', padding: '14px 28px', borderRadius: '10px', fontWeight: 'bold', textDecoration: 'none', fontSize: '15px' }}>
-              🚀 Try Live Demo Below
-            </a>
-            <a href="#calculator" style={{ background: '#111520', color: '#9CA3AF', border: '1px solid #1E2638', padding: '14px 28px', borderRadius: '10px', fontWeight: 'bold', textDecoration: 'none', fontSize: '15px' }}>
-              📊 Calculate Revenue Impact
-            </a>
-          </div>
-        </div>
+        <SearchManifest
+          prompt={prompt}
+          setPrompt={setPrompt}
+          country={country}
+          setCountry={setCountry}
+          onSubmit={runSearch}
+          loading={loading}
+        />
 
-        {/* REVENUE CALCULATOR CARD */}
-        <div id="calculator" style={{ background: '#111520', border: '1px solid #1E2638', borderRadius: '16px', padding: '40px 30px', textAlign: 'center', marginBottom: '60px' }}>
-          <h2 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '8px' }}>Calculate Your Revenue Increase</h2>
-          <p style={{ color: '#9CA3AF', fontSize: '14px', marginBottom: '32px' }}>
-            See how switching from single items to 3-piece systems impacts your bottom line.
-          </p>
+        {bundle && <EngineStatusRow status={bundle.platformStatus} />}
 
-          <input
-            type="range"
-            min="100"
-            max="2000"
-            value={orders}
-            onChange={(e) => setOrders(Number(e.target.value))}
-            style={{ width: '100%', accentColor: '#38BDF8', cursor: 'pointer', marginBottom: '20px' }}
-          />
+        {bundle && bundle.warnings.length > 0 && (
+          <WarningsPanel warnings={bundle.warnings} />
+        )}
 
-          <div style={{ color: '#38BDF8', fontWeight: 'bold', fontSize: '15px', marginBottom: '30px' }}>
-            Monthly Orders: {orders}
-          </div>
+        {error && <ErrorPanel message={error} />}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            <div style={{ background: 'rgba(239, 68, 68, 0.05)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
-              <div style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '6px' }}>Single Product Profit ($12/sale)</div>
-              <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#EF4444' }}>${singleProfit.toLocaleString()} / mo</div>
-            </div>
-            <div style={{ background: 'rgba(34, 197, 94, 0.05)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.1)' }}>
-              <div style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '6px' }}>BundleOS System Profit ($34/sale)</div>
-              <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#22C55E' }}>${bundleProfit.toLocaleString()} / mo</div>
-            </div>
-          </div>
-        </div>
+        {loading && <LoadingState />}
 
-        {/* WHY SINGLE-ITEM DROPSHIPPING IS DEAD */}
-        <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-          <h2 style={{ fontSize: '28px', fontWeight: 'bold', textAlign: 'center', marginBottom: '32px' }}>
-            Why Single-Item Dropshipping Is Dead
-          </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', textAlign: 'left' }}>
-            
-            <div style={{ background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '16px', padding: '28px' }}>
-              <h3 style={{ color: '#EF4444', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px' }}>
-                ❌ Old Way (DSers / Single Items)
-              </h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '14px', color: '#D1D5DB' }}>
-                <li>❌ Sells 1 commodity item for $19.99</li>
-                <li>❌ High Ad CAC eats entire profit</li>
-                <li>❌ Customer gets 3 packages from 3 sellers</li>
-                <li>❌ High returns & bad customer retention</li>
-              </ul>
-            </div>
-
-            <div style={{ background: 'rgba(34, 197, 94, 0.03)', border: '1px solid rgba(34, 197, 94, 0.2)', borderRadius: '16px', padding: '28px' }}>
-              <h3 style={{ color: '#22C55E', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px' }}>
-                ✅ BundleOS System Method
-              </h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '14px', color: '#D1D5DB' }}>
-                <li>✅ Sells a 3-piece Routine System for $44.99+</li>
-                <li>✅ Low Break-Even ROAS (1.28) allows easy scaling</li>
-                <li>✅ 1 Consolidated Package with 1 Tracking Number</li>
-                <li>✅ High perceived value & branded unboxing</li>
-              </ul>
-            </div>
-
-          </div>
-        </div>
-
-        {/* CONSOLE TERMINAL (LIVE AI SEARCH ENGINE) */}
-        <div id="console" style={{ background: '#0D111A', border: '1px solid #1E2638', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)', textAlign: 'left' }}>
-          
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #1A2130', paddingBottom: '12px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#EF4444' }}></div>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#F59E0B' }}></div>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#10B981' }}></div>
-            </div>
-            <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace' }}>
-              Console v2.4 • Connected to Live Sourcing Engine
-            </span>
-          </div>
-
-          <form onSubmit={handleSource} style={{ marginBottom: '20px' }}>
-            <div style={{ background: '#161C2B', border: '1px solid #252F45', borderRadius: '8px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ color: '#38BDF8', fontFamily: 'monospace', fontWeight: 'bold' }}>PROMPT:</span>
-              <input
-                type="text"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                style={{ flex: 1, background: 'transparent', border: 'none', color: '#F3F4F6', fontSize: '14px', outline: 'none', fontFamily: 'monospace' }}
-              />
-              <button type="submit" style={{ background: '#38BDF8', color: '#090B10', padding: '8px 16px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
-                {loading ? 'Scanning Engine...' : 'Run Engine'}
-              </button>
-            </div>
-          </form>
-
-          {bundleData && (
-            <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-                {bundleData.components.map((c: any) => (
-                  <div key={c.id} style={{ background: '#121724', border: '1px solid #212B3E', borderRadius: '10px', padding: '16px' }}>
-                    <h4 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '6px' }}>{c.name}</h4>
-                    <p style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '12px' }}>Supplier: {c.supplier || 'China Factory'}</p>
-                    <div style={{ fontSize: '12px', color: '#D1D5DB' }}>
-                      Unit Cost: <b style={{ color: 'white' }}>${c.rawCost}</b> | Stock: <b>{c.stock || '10,000+'}</b>
-                    </div>
-                  </div>
+        {!loading && bundle && bundle.products.length > 0 && (
+          <>
+            <section className="mt-10">
+              <SectionLabel index="01" title="Sourced components" />
+              <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {bundle.products.map((product, i) => (
+                  <ProductTag key={i} product={product} />
                 ))}
               </div>
+            </section>
 
-              <div style={{ background: 'rgba(34, 197, 94, 0.06)', border: '1px solid rgba(34, 197, 94, 0.2)', borderRadius: '10px', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
-                <div style={{ display: 'flex', gap: '20px', fontSize: '14px', flexWrap: 'wrap' }}>
-                  <div>Landed Cost: <b>${bundleData.financials.totalLandedCost}</b></div>
-                  <div>Retail Target: <b>${bundleData.financials.suggestedRetail}</b></div>
-                  <div style={{ color: '#22C55E' }}>Gross Profit: <b>${bundleData.financials.grossProfit} ({bundleData.financials.grossMarginPercentage}%)</b></div>
-                </div>
-                <button
-                  onClick={handlePushShopify}
-                  type="button"
-                  style={{ background: '#22C55E', color: '#052E16', padding: '10px 20px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}
-                >
-                  {pushingShopify ? 'Pushing...' : 'Push to Shopify →'}
-                </button>
-              </div>
+            {bundle.financials && (
+              <section className="mt-10">
+                <SectionLabel index="02" title="Bundle economics" />
+                <FinancialLedger financials={bundle.financials} />
+              </section>
+            )}
 
-              <div style={{ marginTop: '24px', borderTop: '1px solid #1E2638', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '13px', color: '#9CA3AF', fontWeight: 'bold' }}>AI Visual Studio Engine</span>
-                <button
-                  onClick={handleProcessStudio}
-                  type="button"
-                  style={{ background: '#8B5CF6', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
-                >
-                  {processingImages ? 'Rendering Studio Art...' : '✨ Enhance Studio Images'}
-                </button>
-              </div>
+            <section className="mt-10">
+              <SectionLabel index="03" title="Bundle visual asset" />
+              <BundleVisual
+                loading={assetLoading}
+                url={assetUrl}
+                error={assetError}
+              />
+            </section>
+          </>
+        )}
 
-              {/* CANLI DİNAMİK STÜDYO GÖRSELİ */}
-              {studioResult && (
-                <div style={{ marginTop: '16px', background: '#161C2B', padding: '12px', borderRadius: '10px', border: '1px solid #8B5CF6', overflow: 'hidden' }}>
-                  <img 
-                    src={studioResult.heroStudioImage} 
-                    alt="Dynamic Studio Asset" 
-                    style={{ width: '100%', maxHeight: '350px', objectFit: 'cover', borderRadius: '8px', display: 'block' }} 
-                  />
-                </div>
-              )}
-            </div>
-          )}
+        {!loading && bundle && bundle.products.length === 0 && (
+          <EmptyState prompt={bundle.prompt} />
+        )}
+      </div>
+    </div>
+  );
+}
 
-        </div>
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
 
-      </main>
+function Header() {
+  return (
+    <header className="flex items-end justify-between border-b-2 pb-6" style={{ borderColor: "#10202A" }}>
+      <div>
+        <p
+          className="text-xs tracking-[0.3em]"
+          style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+        >
+          MANIFEST No. SRC-0114
+        </p>
+        <h1
+          className="mt-1 text-3xl sm:text-4xl"
+          style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "#10202A" }}
+        >
+          Sourcing Engine
+        </h1>
+      </div>
+      <p
+        className="hidden max-w-[220px] text-right text-xs leading-relaxed sm:block"
+        style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+      >
+        LIVE FACTORY DATA
+        <br />
+        CJ · ALIEXPRESS · AUTODS
+      </p>
+    </header>
+  );
+}
 
-      {/* STICKY BOTTOM BAR */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#0D111A', borderTop: '1px solid #1E2638', padding: '16px 8%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 100 }}>
-        <div>
-          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Lock in Founding VIP Rate ($29/mo)</div>
-          <div style={{ fontSize: '11px', color: '#9CA3AF' }}>Only 18 VIP beta licenses remaining for August 2026.</div>
-        </div>
-        <button style={{ background: '#3B82F6', color: 'white', padding: '10px 24px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}>
-          Claim VIP License
-        </button>
+// ---------------------------------------------------------------------------
+// Search bar ("manifest entry line")
+// ---------------------------------------------------------------------------
+
+function SearchManifest({
+  prompt,
+  setPrompt,
+  country,
+  setCountry,
+  onSubmit,
+  loading,
+}: {
+  prompt: string;
+  setPrompt: (v: string) => void;
+  country: string;
+  setCountry: (v: string) => void;
+  onSubmit: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div
+      className="mt-8 flex flex-col gap-3 border-2 p-3 sm:flex-row sm:items-center"
+      style={{ borderColor: "#10202A", background: "#FFFDF7" }}
+    >
+      <input
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+        }}
+        placeholder="e.g. 3-piece ceramic car washing and interior detailing system"
+        className="flex-1 bg-transparent px-3 py-2 text-base outline-none placeholder:opacity-50"
+        style={{ color: "#10202A" }}
+        aria-label="Product bundle prompt"
+      />
+
+      <div className="flex items-center gap-2 border-t pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-3" style={{ borderColor: "#D8CFB8" }}>
+        <label
+          className="text-xs tracking-widest"
+          style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+        >
+          SHIP TO
+        </label>
+        <select
+          value={country}
+          onChange={(e) => setCountry(e.target.value)}
+          className="bg-transparent px-2 py-2 text-sm outline-none"
+          style={{ fontFamily: "var(--font-mono)", color: "#10202A" }}
+        >
+          {COUNTRIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.code}
+            </option>
+          ))}
+        </select>
       </div>
 
+      <button
+        onClick={onSubmit}
+        disabled={loading || !prompt.trim()}
+        className="whitespace-nowrap px-6 py-3 text-sm font-semibold tracking-wide transition-opacity disabled:opacity-40"
+        style={{ background: "#E2A63B", color: "#10202A" }}
+      >
+        {loading ? "SEARCHING…" : "RUN SEARCH →"}
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Engine status row
+// ---------------------------------------------------------------------------
+
+const STATUS_META: Record<PlatformState, { label: string; color: string }> = {
+  ok: { label: "LIVE", color: "#4B7A5B" },
+  skipped_no_key: { label: "NO KEY", color: "#B08A3E" },
+  failed: { label: "FAILED", color: "#B1503A" },
+};
+
+function EngineStatusRow({ status }: { status: Record<Source, PlatformState> }) {
+  return (
+    <div className="mt-5 flex flex-wrap gap-3">
+      {PLATFORM_ORDER.map((source) => {
+        const state = status[source] ?? "skipped_no_key";
+        const meta = STATUS_META[state];
+        return (
+          <div
+            key={source}
+            className="flex items-center gap-2 border px-3 py-1.5"
+            style={{ borderColor: "#10202A", background: "#FFFDF7" }}
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ background: meta.color }}
+            />
+            <span
+              className="text-xs font-semibold"
+              style={{ fontFamily: "var(--font-mono)", color: "#10202A" }}
+            >
+              {SOURCE_META[source].label}
+            </span>
+            <span
+              className="text-[10px] tracking-widest"
+              style={{ fontFamily: "var(--font-mono)", color: meta.color }}
+            >
+              {meta.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Product card ("cargo tag")
+// ---------------------------------------------------------------------------
+
+function ProductTag({ product }: { product: Product }) {
+  const meta = SOURCE_META[product.source];
+  return (
+    <div
+      className="relative flex flex-col border-2"
+      style={{ borderColor: "#10202A", background: "#FFFDF7" }}
+    >
+      <div
+        className="absolute right-3 top-3 z-10 flex h-11 w-11 rotate-6 items-center justify-center rounded-full border-2 text-[11px] font-bold"
+        style={{ borderColor: "#B1503A", color: "#B1503A" }}
+        aria-label={`Source: ${meta.label}`}
+      >
+        {meta.stamp}
+      </div>
+
+      <div className="aspect-square w-full overflow-hidden" style={{ background: "#EFE8D6" }}>
+        {product.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={product.imageUrl}
+            alt={product.title}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div
+            className="flex h-full w-full items-center justify-center text-xs"
+            style={{ fontFamily: "var(--font-mono)", color: "#B0A88C" }}
+          >
+            NO IMAGE
+          </div>
+        )}
+      </div>
+
+      <div
+        className="mx-4 my-0 border-t-2 border-dashed"
+        style={{ borderColor: "#D8CFB8" }}
+      />
+
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <p
+          className="text-sm leading-snug"
+          style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "#10202A" }}
+          title={product.title}
+        >
+          {product.title}
+        </p>
+
+        {product.supplierName && (
+          <p
+            className="text-[11px] tracking-wide"
+            style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+          >
+            SUPPLIER · {product.supplierName.toUpperCase()}
+          </p>
+        )}
+
+        <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+          <DataPair label="FACTORY COST" value={formatMoney(product.factoryPrice, product.currency)} />
+          <DataPair label="SHIPPING" value={formatMoney(product.shippingCost, product.currency)} />
+          <DataPair
+            label="STOCK"
+            value={product.stock !== null ? product.stock.toLocaleString("en-US") : "—"}
+          />
+          <DataPair label="SOURCE" value={meta.label.toUpperCase()} />
+        </dl>
+
+        <div className="mt-auto pt-2">
+          {product.productUrl ? (
+            <a
+              href={product.productUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block border-2 px-3 py-1.5 text-xs font-semibold"
+              style={{ borderColor: "#10202A", color: "#10202A" }}
+            >
+              VIEW ON {meta.label.toUpperCase()} ↗
+            </a>
+          ) : (
+            <span
+              className="inline-block text-xs"
+              style={{ fontFamily: "var(--font-mono)", color: "#B0A88C" }}
+            >
+              NO DIRECT LINK AVAILABLE
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataPair({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt
+        className="text-[10px] tracking-widest"
+        style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+      >
+        {label}
+      </dt>
+      <dd
+        className="text-sm"
+        style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#10202A" }}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Financial ledger
+// ---------------------------------------------------------------------------
+
+function FinancialLedger({ financials }: { financials: Financials }) {
+  const rows: Array<[string, string, boolean?]> = [
+    ["TOTAL FACTORY COST", formatMoney(financials.totalFactoryCost)],
+    ["TOTAL LANDED COST", formatMoney(financials.totalLandedCost)],
+    ["SUGGESTED RETAIL", formatMoney(financials.suggestedRetailPrice)],
+    ["GROSS PROFIT / UNIT", formatMoney(financials.grossProfit), true],
+    ["GROSS MARGIN", `${financials.grossMarginPercent.toFixed(1)}%`, true],
+  ];
+
+  return (
+    <div className="mt-4 border-2" style={{ borderColor: "#10202A", background: "#FFFDF7" }}>
+      <div className="flex flex-col divide-y-2 sm:flex-row sm:divide-x-2 sm:divide-y-0" style={{ borderColor: "#10202A" }}>
+        {rows.map(([label, value, highlight]) => (
+          <div key={label} className="flex-1 px-5 py-4" style={{ borderColor: "#10202A" }}>
+            <p
+              className="text-[10px] tracking-widest"
+              style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+            >
+              {label}
+            </p>
+            <p
+              className="mt-1 text-xl"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontWeight: 600,
+                color: highlight ? "#4B7A5B" : "#10202A",
+              }}
+            >
+              {value}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bundle visual asset panel
+// ---------------------------------------------------------------------------
+
+function BundleVisual({
+  loading,
+  url,
+  error,
+}: {
+  loading: boolean;
+  url: string | null;
+  error: string | null;
+}) {
+  return (
+    <div
+      className="mt-4 flex min-h-[220px] items-center justify-center border-2 p-6"
+      style={{ borderColor: "#10202A", background: "#FFFDF7" }}
+    >
+      {loading && (
+        <p
+          className="text-xs tracking-widest"
+          style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+        >
+          RENDERING BUNDLE VISUAL…
+        </p>
+      )}
+
+      {!loading && error && (
+        <p
+          className="max-w-md text-center text-xs"
+          style={{ fontFamily: "var(--font-mono)", color: "#B1503A" }}
+        >
+          {error}
+        </p>
+      )}
+
+      {!loading && !error && url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt="Generated bundle visual asset"
+          className="max-h-[420px] w-auto object-contain"
+        />
+      )}
+
+      {!loading && !error && !url && (
+        <p
+          className="text-xs tracking-widest"
+          style={{ fontFamily: "var(--font-mono)", color: "#B0A88C" }}
+        >
+          NO ASSET GENERATED YET
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small shared pieces
+// ---------------------------------------------------------------------------
+
+function SectionLabel({ index, title }: { index: string; title: string }) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span
+        className="text-xs tracking-widest"
+        style={{ fontFamily: "var(--font-mono)", color: "#B1503A" }}
+      >
+        {index}
+      </span>
+      <h2
+        className="text-lg"
+        style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "#10202A" }}
+      >
+        {title}
+      </h2>
+      <span className="h-px flex-1" style={{ background: "#D8CFB8" }} />
+    </div>
+  );
+}
+
+function WarningsPanel({ warnings }: { warnings: string[] }) {
+  return (
+    <div
+      className="mt-5 border-l-4 p-4"
+      style={{ borderColor: "#B08A3E", background: "#FBF3DD" }}
+    >
+      <p
+        className="text-xs tracking-widest"
+        style={{ fontFamily: "var(--font-mono)", color: "#8A6A2E" }}
+      >
+        WARNINGS
+      </p>
+      <ul className="mt-2 space-y-1">
+        {warnings.map((w, i) => (
+          <li
+            key={i}
+            className="text-xs"
+            style={{ fontFamily: "var(--font-mono)", color: "#6B5426" }}
+          >
+            · {w}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ErrorPanel({ message }: { message: string }) {
+  return (
+    <div
+      className="mt-5 border-l-4 p-4"
+      style={{ borderColor: "#B1503A", background: "#F9E4DD" }}
+    >
+      <p
+        className="text-xs tracking-widest"
+        style={{ fontFamily: "var(--font-mono)", color: "#8C3B29" }}
+      >
+        SEARCH ERROR
+      </p>
+      <p className="mt-1 text-sm" style={{ color: "#8C3B29" }}>
+        {message}
+      </p>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="aspect-[3/4] animate-pulse border-2"
+          style={{ borderColor: "#D8CFB8", background: "#EFE8D6" }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ prompt }: { prompt: string }) {
+  return (
+    <div
+      className="mt-10 border-2 border-dashed p-8 text-center"
+      style={{ borderColor: "#D8CFB8" }}
+    >
+      <p
+        className="text-sm"
+        style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
+      >
+        No live products came back for “{prompt}”. Check the engine status above,
+        or try a more specific search.
+      </p>
     </div>
   );
 }
