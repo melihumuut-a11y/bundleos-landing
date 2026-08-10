@@ -1,33 +1,9 @@
-"use client";
+'use client';
 
-import { useState, useCallback } from "react";
-import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { useState } from 'react';
 
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-const body = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-body",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-mono",
-});
-
-// ---------------------------------------------------------------------------
-// Types — mirrors app/api/generate-bundle/route.ts's response schema exactly
-// ---------------------------------------------------------------------------
-
-type Source = "cjdropshipping" | "aliexpress" | "autods";
-type PlatformState = "ok" | "skipped_no_key" | "failed";
-
-interface Product {
-  source: Source;
+interface NormalizedProduct {
+  source: 'cjdropshipping' | 'aliexpress' | 'autods';
   title: string;
   imageUrl: string;
   factoryPrice: number | null;
@@ -38,7 +14,7 @@ interface Product {
   productUrl: string | null;
 }
 
-interface Financials {
+interface BundleFinancials {
   totalFactoryCost: number;
   totalLandedCost: number;
   suggestedRetailPrice: number;
@@ -48,636 +24,229 @@ interface Financials {
 
 interface BundleResponse {
   prompt: string;
-  products: Product[];
-  financials: Financials | null;
-  platformStatus: Record<Source, PlatformState>;
+  products: NormalizedProduct[];
+  financials: BundleFinancials | null;
+  platformStatus: Record<string, 'ok' | 'skipped_no_key' | 'failed'>;
   warnings: string[];
   generatedAt: string;
 }
 
-const COUNTRIES = [
-  { code: "US", label: "United States" },
-  { code: "TR", label: "Türkiye" },
-  { code: "DE", label: "Germany" },
-  { code: "GB", label: "United Kingdom" },
-  { code: "FR", label: "France" },
-  { code: "CA", label: "Canada" },
-];
-
-const SOURCE_META: Record<Source, { label: string; stamp: string }> = {
-  cjdropshipping: { label: "CJ Dropshipping", stamp: "CJ" },
-  aliexpress: { label: "AliExpress", stamp: "AE" },
-  autods: { label: "AutoDS", stamp: "AD" },
-};
-
-const PLATFORM_ORDER: Source[] = ["cjdropshipping", "aliexpress", "autods"];
-
-function formatMoney(value: number | null, currency: string = "USD") {
-  if (value === null) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-  }).format(value);
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-export default function Page() {
-  const [prompt, setPrompt] = useState("");
-  const [country, setCountry] = useState("US");
+export default function Home() {
+  const [prompt, setPrompt] = useState('3-piece ceramic car washing kit');
+  const [destinationCountry, setDestinationCountry] = useState('US');
   const [loading, setLoading] = useState(false);
-  const [bundle, setBundle] = useState<BundleResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [processingImages, setProcessingImages] = useState(false);
+  const [data, setData] = useState<BundleResponse | null>(null);
+  const [studioResult, setStudioResult] = useState<any>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [assetUrl, setAssetUrl] = useState<string | null>(null);
-  const [assetLoading, setAssetLoading] = useState(false);
-  const [assetError, setAssetError] = useState<string | null>(null);
-
-  const requestBundleVisual = useCallback(
-    async (products: Product[], searchPrompt: string) => {
-      setAssetLoading(true);
-      setAssetError(null);
-      setAssetUrl(null);
-      try {
-        const res = await fetch("/api/process-images", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: searchPrompt, products }),
-        });
-        if (!res.ok) throw new Error(`Image asset request failed (${res.status})`);
-        const data = await res.json();
-        const url: string | undefined = data?.imageUrl ?? data?.url;
-        if (!url) throw new Error("Response did not include an image URL");
-        setAssetUrl(url);
-      } catch (err) {
-        setAssetError(
-          err instanceof Error ? err.message : "Could not render the bundle visual."
-        );
-      } finally {
-        setAssetLoading(false);
-      }
-    },
-    []
-  );
-
-  const runSearch = useCallback(async () => {
-    const trimmed = prompt.trim();
-    if (!trimmed) return;
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
 
     setLoading(true);
-    setError(null);
-    setBundle(null);
-    setAssetUrl(null);
-    setAssetError(null);
+    setErrorMsg(null);
+    setStudioResult(null);
 
     try {
-      const res = await fetch("/api/generate-bundle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: trimmed, destinationCountry: country }),
+      const res = await fetch('/api/generate-bundle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, destinationCountry }),
       });
 
-      const data: BundleResponse = await res.json();
+      const result = await res.json();
 
-      if (!res.ok) {
-        throw new Error((data as any)?.error ?? `Search failed (${res.status})`);
+      if (!res.ok && (!result.products || result.products.length === 0)) {
+        setErrorMsg(result.warnings?.join(' | ') || 'No live data returned. Check API Keys.');
+        setData(result);
+      } else {
+        setData(result);
+        if (result.products && result.products.length > 0) {
+          fetchStudioImage(result.products, prompt);
+        }
       }
-
-      setBundle(data);
-
-      if (data.products.length > 0) {
-        void requestBundleVisual(data.products, trimmed);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } catch (err: any) {
+      setErrorMsg('Failed to fetch from live search engine pipeline.');
     } finally {
       setLoading(false);
     }
-  }, [prompt, country, requestBundleVisual]);
+  };
+
+  const fetchStudioImage = async (products: NormalizedProduct[], currentPrompt: string) => {
+    setProcessingImages(true);
+    try {
+      const res = await fetch('/api/process-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ components: products, prompt: currentPrompt }),
+      });
+      const imgData = await res.json();
+      if (imgData.success || imgData.heroStudioImage) {
+        setStudioResult(imgData);
+      }
+    } catch (err) {
+      console.error('Studio render error:', err);
+    } finally {
+      setProcessingImages(false);
+    }
+  };
 
   return (
-    <div
-      className={`${display.variable} ${body.variable} ${mono.variable} min-h-screen`}
-      style={{ background: "#F2ECDD", fontFamily: "var(--font-body)" }}
-    >
-      <div className="mx-auto max-w-6xl px-6 py-10 sm:px-10">
-        <Header />
+    <div style={{ background: '#10202A', color: '#F2ECDD', minHeight: '100vh', fontFamily: 'monospace', padding: '30px 20px 100px' }}>
+      
+      {/* HEADER / MANIFESTO TITLE */}
+      <header style={{ maxWidth: '1100px', margin: '0 auto 30px', borderBottom: '2px dashed #E2A63B', paddingBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
+        <div>
+          <span style={{ background: '#E2A63B', color: '#10202A', padding: '2px 8px', fontWeight: 'bold', fontSize: '12px' }}>
+            GLOBAL SOURCING MANIFESTO v3.0
+          </span>
+          <h1 style={{ fontSize: '28px', fontWeight: '900', letterSpacing: '-1px', margin: '8px 0 0', color: '#FFF' }}>
+            BUNDLEOS // META-SEARCH ENGINE
+          </h1>
+        </div>
 
-        <SearchManifest
-          prompt={prompt}
-          setPrompt={setPrompt}
-          country={country}
-          setCountry={setCountry}
-          onSubmit={runSearch}
-          loading={loading}
-        />
+        {/* API ENGINE STATUS BADGES */}
+        <div style={{ display: 'flex', gap: '12px', background: '#0A141A', padding: '10px 14px', border: '1px solid #203542', borderRadius: '4px' }}>
+          {['cjdropshipping', 'aliexpress', 'autods'].map((platform) => {
+            const status = data?.platformStatus?.[platform] || 'skipped_no_key';
+            const color = status === 'ok' ? '#22C55E' : status === 'failed' ? '#EF4444' : '#E2A63B';
+            return (
+              <div key={platform} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, display: 'inline-block' }}></span>
+                <span style={{ textTransform: 'uppercase', color: '#A0B0BC' }}>{platform.slice(0, 2)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </header>
 
-        {bundle && <EngineStatusRow status={bundle.platformStatus} />}
+      <main style={{ maxWidth: '1100px', margin: '0 auto' }}>
+        
+        {/* SEARCH BAR & SHIP TO COUNTRY */}
+        <form onSubmit={handleSearch} style={{ background: '#182C38', border: '2px solid #203542', padding: '16px', borderRadius: '6px', marginBottom: '30px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: '280px', display: 'flex', alignItems: 'center', background: '#0A141A', border: '1px solid #203542', padding: '0 12px' }}>
+            <span style={{ color: '#E2A63B', marginRight: '10px', fontWeight: 'bold' }}>PROMPT&gt;</span>
+            <input
+              type="text"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. 3-piece ceramic car washing kit"
+              style={{ flex: 1, background: 'transparent', border: 'none', color: '#F2ECDD', padding: '12px 0', outline: 'none', fontFamily: 'monospace', fontSize: '14px' }}
+            />
+          </div>
 
-        {bundle && bundle.warnings.length > 0 && (
-          <WarningsPanel warnings={bundle.warnings} />
+          <div style={{ display: 'flex', alignItems: 'center', background: '#0A141A', border: '1px solid #203542', padding: '0 12px' }}>
+            <span style={{ color: '#A0B0BC', fontSize: '12px', marginRight: '8px' }}>SHIP TO:</span>
+            <select
+              value={destinationCountry}
+              onChange={(e) => setDestinationCountry(e.target.value)}
+              style={{ background: 'transparent', color: '#E2A63B', border: 'none', outline: 'none', fontWeight: 'bold', fontFamily: 'monospace', cursor: 'pointer' }}
+            >
+              <option value="US" style={{ background: '#10202A' }}>🇺🇸 US</option>
+              <option value="TR" style={{ background: '#10202A' }}>🇹🇷 TR</option>
+              <option value="DE" style={{ background: '#10202A' }}>🇩🇪 DE</option>
+              <option value="GB" style={{ background: '#10202A' }}>🇬🇧 GB</option>
+              <option value="FR" style={{ background: '#10202A' }}>🇫🇷 FR</option>
+              <option value="CA" style={{ background: '#10202A' }}>🇨🇦 CA</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{ background: '#E2A63B', color: '#10202A', border: 'none', padding: '0 24px', fontWeight: 'bold', cursor: 'pointer', fontFamily: 'monospace', fontSize: '14px' }}
+          >
+            {loading ? 'EXECUTING PIPELINE...' : 'RUN MANIFESTO ENGINE ↵'}
+          </button>
+        </form>
+
+        {/* WARNINGS / ERROR PANEL */}
+        {data?.warnings && data.warnings.length > 0 && (
+          <div style={{ background: 'rgba(226, 166, 59, 0.1)', border: '1px solid #E2A63B', padding: '12px 16px', borderRadius: '4px', marginBottom: '24px', fontSize: '12px', color: '#E2A63B' }}>
+            <b>⚠️ PIPELINE STATUS & WARNINGS:</b>
+            <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+              {data.warnings.map((w, idx) => <li key={idx}>{w}</li>)}
+            </ul>
+          </div>
         )}
 
-        {error && <ErrorPanel message={error} />}
+        {/* PRODUCTS CARDS GRID */}
+        {data?.products && data.products.length > 0 && (
+          <div>
+            <h3 style={{ fontSize: '14px', textTransform: 'uppercase', color: '#A0B0BC', marginBottom: '16px', letterSpacing: '1px' }}>
+              // MANIFESTO SOURCED COMPONENTS ({data.products.length})
+            </h3>
 
-        {loading && <LoadingState />}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '30px' }}>
+              {data.products.map((item, idx) => (
+                <div key={idx} style={{ background: '#F2ECDD', color: '#10202A', borderRadius: '4px', border: '2px solid #0A141A', padding: '16px', position: 'relative', boxShadow: '4px 4px 0px #0A141A' }}>
+                  
+                  {/* SOURCE STAMP */}
+                  <div style={{ position: 'absolute', top: '10px', right: '10px', background: '#10202A', color: '#E2A63B', padding: '2px 8px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    STAMP: {item.source}
+                  </div>
 
-        {!loading && bundle && bundle.products.length > 0 && (
-          <>
-            <section className="mt-10">
-              <SectionLabel index="01" title="Sourced components" />
-              <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {bundle.products.map((product, i) => (
-                  <ProductTag key={i} product={product} />
-                ))}
+                  {/* PRODUCT IMAGE */}
+                  <div style={{ width: '100%', height: '180px', background: '#DCD4C0', marginBottom: '12px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <span style={{ fontSize: '12px', color: '#666' }}>NO LIVE IMAGE</span>
+                    )}
+                  </div>
+
+                  <h4 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px', height: '40px', overflow: 'hidden', lineHeight: '1.3' }}>
+                    {item.title}
+                  </h4>
+
+                  <div style={{ borderTop: '2px dashed #0A141A', paddingTop: '10px', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div>FACTORY COST: <b>${item.factoryPrice ?? 'N/A'}</b></div>
+                    <div>LIVE FREIGHT ({destinationCountry}): <b>${item.shippingCost ?? 'N/A'}</b></div>
+                    <div>STOCK LEVEL: <b>{item.stock ? item.stock.toLocaleString() + ' units' : 'N/A'}</b></div>
+                  </div>
+
+                  {item.productUrl ? (
+                    <a href={item.productUrl} target="_blank" rel="noreferrer" style={{ display: 'block', marginTop: '12px', background: '#10202A', color: '#F2ECDD', textAlign: 'center', padding: '8px', fontSize: '11px', fontWeight: 'bold', textDecoration: 'none' }}>
+                      VIEW SUPPLIER LINK ↗
+                    </a>
+                  ) : (
+                    <div style={{ marginTop: '12px', background: '#CCC', color: '#555', textAlign: 'center', padding: '8px', fontSize: '10px' }}>
+                      DIRECT LINK RESTRICTED
+                    </div>
+                  )}
+
+                </div>
+              ))}
+            </div>
+
+            {/* FINANCIAL LEDGER */}
+            {data.financials && (
+              <div style={{ background: '#182C38', border: '2px solid #E2A63B', padding: '20px', borderRadius: '4px', marginBottom: '30px' }}>
+                <h4 style={{ color: '#E2A63B', margin: '0 0 14px 0', fontSize: '14px', textTransform: 'uppercase' }}>
+                  // FINANCIAL LEDGER SUMMARY
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '15px', fontSize: '13px' }}>
+                  <div>TOTAL FACTORY COST: <b style={{ color: '#FFF' }}>${data.financials.totalFactoryCost}</b></div>
+                  <div>TOTAL LANDED COST: <b style={{ color: '#FFF' }}>${data.financials.totalLandedCost}</b></div>
+                  <div>SUGGESTED RETAIL: <b style={{ color: '#FFF' }}>${data.financials.suggestedRetailPrice}</b></div>
+                  <div style={{ color: '#22C55E' }}>GROSS PROFIT: <b>${data.financials.grossProfit} ({data.financials.grossMarginPercent}%)</b></div>
+                </div>
               </div>
-            </section>
-
-            {bundle.financials && (
-              <section className="mt-10">
-                <SectionLabel index="02" title="Bundle economics" />
-                <FinancialLedger financials={bundle.financials} />
-              </section>
             )}
 
-            <section className="mt-10">
-              <SectionLabel index="03" title="Bundle visual asset" />
-              <BundleVisual
-                loading={assetLoading}
-                url={assetUrl}
-                error={assetError}
-              />
-            </section>
-          </>
-        )}
+            {/* STUDIO VISUAL ASSET */}
+            {studioResult && (
+              <div style={{ background: '#0A141A', border: '1px solid #203542', padding: '16px', borderRadius: '4px' }}>
+                <h4 style={{ color: '#A0B0BC', margin: '0 0 10px 0', fontSize: '12px' }}>// AI STUDIO VISUAL ASSET RENDER</h4>
+                <img src={studioResult.heroStudioImage || studioResult.imageUrl} alt="Studio Render" style={{ width: '100%', maxHeight: '350px', objectFit: 'cover', borderRadius: '2px' }} />
+              </div>
+            )}
 
-        {!loading && bundle && bundle.products.length === 0 && (
-          <EmptyState prompt={bundle.prompt} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
-
-function Header() {
-  return (
-    <header className="flex items-end justify-between border-b-2 pb-6" style={{ borderColor: "#10202A" }}>
-      <div>
-        <p
-          className="text-xs tracking-[0.3em]"
-          style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-        >
-          MANIFEST No. SRC-0114
-        </p>
-        <h1
-          className="mt-1 text-3xl sm:text-4xl"
-          style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "#10202A" }}
-        >
-          Sourcing Engine
-        </h1>
-      </div>
-      <p
-        className="hidden max-w-[220px] text-right text-xs leading-relaxed sm:block"
-        style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-      >
-        LIVE FACTORY DATA
-        <br />
-        CJ · ALIEXPRESS · AUTODS
-      </p>
-    </header>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Search bar ("manifest entry line")
-// ---------------------------------------------------------------------------
-
-function SearchManifest({
-  prompt,
-  setPrompt,
-  country,
-  setCountry,
-  onSubmit,
-  loading,
-}: {
-  prompt: string;
-  setPrompt: (v: string) => void;
-  country: string;
-  setCountry: (v: string) => void;
-  onSubmit: () => void;
-  loading: boolean;
-}) {
-  return (
-    <div
-      className="mt-8 flex flex-col gap-3 border-2 p-3 sm:flex-row sm:items-center"
-      style={{ borderColor: "#10202A", background: "#FFFDF7" }}
-    >
-      <input
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit();
-        }}
-        placeholder="e.g. 3-piece ceramic car washing and interior detailing system"
-        className="flex-1 bg-transparent px-3 py-2 text-base outline-none placeholder:opacity-50"
-        style={{ color: "#10202A" }}
-        aria-label="Product bundle prompt"
-      />
-
-      <div className="flex items-center gap-2 border-t pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-3" style={{ borderColor: "#D8CFB8" }}>
-        <label
-          className="text-xs tracking-widest"
-          style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-        >
-          SHIP TO
-        </label>
-        <select
-          value={country}
-          onChange={(e) => setCountry(e.target.value)}
-          className="bg-transparent px-2 py-2 text-sm outline-none"
-          style={{ fontFamily: "var(--font-mono)", color: "#10202A" }}
-        >
-          {COUNTRIES.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.code}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <button
-        onClick={onSubmit}
-        disabled={loading || !prompt.trim()}
-        className="whitespace-nowrap px-6 py-3 text-sm font-semibold tracking-wide transition-opacity disabled:opacity-40"
-        style={{ background: "#E2A63B", color: "#10202A" }}
-      >
-        {loading ? "SEARCHING…" : "RUN SEARCH →"}
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Engine status row
-// ---------------------------------------------------------------------------
-
-const STATUS_META: Record<PlatformState, { label: string; color: string }> = {
-  ok: { label: "LIVE", color: "#4B7A5B" },
-  skipped_no_key: { label: "NO KEY", color: "#B08A3E" },
-  failed: { label: "FAILED", color: "#B1503A" },
-};
-
-function EngineStatusRow({ status }: { status: Record<Source, PlatformState> }) {
-  return (
-    <div className="mt-5 flex flex-wrap gap-3">
-      {PLATFORM_ORDER.map((source) => {
-        const state = status[source] ?? "skipped_no_key";
-        const meta = STATUS_META[state];
-        return (
-          <div
-            key={source}
-            className="flex items-center gap-2 border px-3 py-1.5"
-            style={{ borderColor: "#10202A", background: "#FFFDF7" }}
-          >
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: meta.color }}
-            />
-            <span
-              className="text-xs font-semibold"
-              style={{ fontFamily: "var(--font-mono)", color: "#10202A" }}
-            >
-              {SOURCE_META[source].label}
-            </span>
-            <span
-              className="text-[10px] tracking-widest"
-              style={{ fontFamily: "var(--font-mono)", color: meta.color }}
-            >
-              {meta.label}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Product card ("cargo tag")
-// ---------------------------------------------------------------------------
-
-function ProductTag({ product }: { product: Product }) {
-  const meta = SOURCE_META[product.source];
-  return (
-    <div
-      className="relative flex flex-col border-2"
-      style={{ borderColor: "#10202A", background: "#FFFDF7" }}
-    >
-      <div
-        className="absolute right-3 top-3 z-10 flex h-11 w-11 rotate-6 items-center justify-center rounded-full border-2 text-[11px] font-bold"
-        style={{ borderColor: "#B1503A", color: "#B1503A" }}
-        aria-label={`Source: ${meta.label}`}
-      >
-        {meta.stamp}
-      </div>
-
-      <div className="aspect-square w-full overflow-hidden" style={{ background: "#EFE8D6" }}>
-        {product.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={product.imageUrl}
-            alt={product.title}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center text-xs"
-            style={{ fontFamily: "var(--font-mono)", color: "#B0A88C" }}
-          >
-            NO IMAGE
           </div>
         )}
-      </div>
 
-      <div
-        className="mx-4 my-0 border-t-2 border-dashed"
-        style={{ borderColor: "#D8CFB8" }}
-      />
-
-      <div className="flex flex-1 flex-col gap-3 p-4">
-        <p
-          className="text-sm leading-snug"
-          style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "#10202A" }}
-          title={product.title}
-        >
-          {product.title}
-        </p>
-
-        {product.supplierName && (
-          <p
-            className="text-[11px] tracking-wide"
-            style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-          >
-            SUPPLIER · {product.supplierName.toUpperCase()}
-          </p>
-        )}
-
-        <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-          <DataPair label="FACTORY COST" value={formatMoney(product.factoryPrice, product.currency)} />
-          <DataPair label="SHIPPING" value={formatMoney(product.shippingCost, product.currency)} />
-          <DataPair
-            label="STOCK"
-            value={product.stock !== null ? product.stock.toLocaleString("en-US") : "—"}
-          />
-          <DataPair label="SOURCE" value={meta.label.toUpperCase()} />
-        </dl>
-
-        <div className="mt-auto pt-2">
-          {product.productUrl ? (
-            <a
-              href={product.productUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block border-2 px-3 py-1.5 text-xs font-semibold"
-              style={{ borderColor: "#10202A", color: "#10202A" }}
-            >
-              VIEW ON {meta.label.toUpperCase()} ↗
-            </a>
-          ) : (
-            <span
-              className="inline-block text-xs"
-              style={{ fontFamily: "var(--font-mono)", color: "#B0A88C" }}
-            >
-              NO DIRECT LINK AVAILABLE
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DataPair({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt
-        className="text-[10px] tracking-widest"
-        style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-      >
-        {label}
-      </dt>
-      <dd
-        className="text-sm"
-        style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#10202A" }}
-      >
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Financial ledger
-// ---------------------------------------------------------------------------
-
-function FinancialLedger({ financials }: { financials: Financials }) {
-  const rows: Array<[string, string, boolean?]> = [
-    ["TOTAL FACTORY COST", formatMoney(financials.totalFactoryCost)],
-    ["TOTAL LANDED COST", formatMoney(financials.totalLandedCost)],
-    ["SUGGESTED RETAIL", formatMoney(financials.suggestedRetailPrice)],
-    ["GROSS PROFIT / UNIT", formatMoney(financials.grossProfit), true],
-    ["GROSS MARGIN", `${financials.grossMarginPercent.toFixed(1)}%`, true],
-  ];
-
-  return (
-    <div className="mt-4 border-2" style={{ borderColor: "#10202A", background: "#FFFDF7" }}>
-      <div className="flex flex-col divide-y-2 sm:flex-row sm:divide-x-2 sm:divide-y-0" style={{ borderColor: "#10202A" }}>
-        {rows.map(([label, value, highlight]) => (
-          <div key={label} className="flex-1 px-5 py-4" style={{ borderColor: "#10202A" }}>
-            <p
-              className="text-[10px] tracking-widest"
-              style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-            >
-              {label}
-            </p>
-            <p
-              className="mt-1 text-xl"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontWeight: 600,
-                color: highlight ? "#4B7A5B" : "#10202A",
-              }}
-            >
-              {value}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Bundle visual asset panel
-// ---------------------------------------------------------------------------
-
-function BundleVisual({
-  loading,
-  url,
-  error,
-}: {
-  loading: boolean;
-  url: string | null;
-  error: string | null;
-}) {
-  return (
-    <div
-      className="mt-4 flex min-h-[220px] items-center justify-center border-2 p-6"
-      style={{ borderColor: "#10202A", background: "#FFFDF7" }}
-    >
-      {loading && (
-        <p
-          className="text-xs tracking-widest"
-          style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-        >
-          RENDERING BUNDLE VISUAL…
-        </p>
-      )}
-
-      {!loading && error && (
-        <p
-          className="max-w-md text-center text-xs"
-          style={{ fontFamily: "var(--font-mono)", color: "#B1503A" }}
-        >
-          {error}
-        </p>
-      )}
-
-      {!loading && !error && url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={url}
-          alt="Generated bundle visual asset"
-          className="max-h-[420px] w-auto object-contain"
-        />
-      )}
-
-      {!loading && !error && !url && (
-        <p
-          className="text-xs tracking-widest"
-          style={{ fontFamily: "var(--font-mono)", color: "#B0A88C" }}
-        >
-          NO ASSET GENERATED YET
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Small shared pieces
-// ---------------------------------------------------------------------------
-
-function SectionLabel({ index, title }: { index: string; title: string }) {
-  return (
-    <div className="flex items-baseline gap-3">
-      <span
-        className="text-xs tracking-widest"
-        style={{ fontFamily: "var(--font-mono)", color: "#B1503A" }}
-      >
-        {index}
-      </span>
-      <h2
-        className="text-lg"
-        style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "#10202A" }}
-      >
-        {title}
-      </h2>
-      <span className="h-px flex-1" style={{ background: "#D8CFB8" }} />
-    </div>
-  );
-}
-
-function WarningsPanel({ warnings }: { warnings: string[] }) {
-  return (
-    <div
-      className="mt-5 border-l-4 p-4"
-      style={{ borderColor: "#B08A3E", background: "#FBF3DD" }}
-    >
-      <p
-        className="text-xs tracking-widest"
-        style={{ fontFamily: "var(--font-mono)", color: "#8A6A2E" }}
-      >
-        WARNINGS
-      </p>
-      <ul className="mt-2 space-y-1">
-        {warnings.map((w, i) => (
-          <li
-            key={i}
-            className="text-xs"
-            style={{ fontFamily: "var(--font-mono)", color: "#6B5426" }}
-          >
-            · {w}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function ErrorPanel({ message }: { message: string }) {
-  return (
-    <div
-      className="mt-5 border-l-4 p-4"
-      style={{ borderColor: "#B1503A", background: "#F9E4DD" }}
-    >
-      <p
-        className="text-xs tracking-widest"
-        style={{ fontFamily: "var(--font-mono)", color: "#8C3B29" }}
-      >
-        SEARCH ERROR
-      </p>
-      <p className="mt-1 text-sm" style={{ color: "#8C3B29" }}>
-        {message}
-      </p>
-    </div>
-  );
-}
-
-function LoadingState() {
-  return (
-    <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="aspect-[3/4] animate-pulse border-2"
-          style={{ borderColor: "#D8CFB8", background: "#EFE8D6" }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function EmptyState({ prompt }: { prompt: string }) {
-  return (
-    <div
-      className="mt-10 border-2 border-dashed p-8 text-center"
-      style={{ borderColor: "#D8CFB8" }}
-    >
-      <p
-        className="text-sm"
-        style={{ fontFamily: "var(--font-mono)", color: "#3E6079" }}
-      >
-        No live products came back for “{prompt}”. Check the engine status above,
-        or try a more specific search.
-      </p>
+      </main>
     </div>
   );
 }
