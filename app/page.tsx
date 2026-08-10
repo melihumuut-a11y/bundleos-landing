@@ -1,156 +1,64 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
 
-export default function Dashboard() {
-  const [prompt, setPrompt] = useState('Build a 3-piece dog cleaning system under $12 landed');
-  const [loading, setLoading] = useState(false);
-  const [bundleData, setBundleData] = useState<any>(null);
-  const [processingImages, setProcessingImages] = useState(false);
-  const [studioResult, setStudioResult] = useState<any>(null);
-  const [pushingShopify, setPushingShopify] = useState(false);
-
-  // 1. AI Sourcing
-  const handleSource = async (e: any) => {
-    e.preventDefault();
-    setLoading(true);
-    setStudioResult(null);
-
-    try {
-      const res = await fetch('/api/generate-bundle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setBundleData(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setLoading(false);
-  };
-
-  // 2. AI Visual Studio
-  const handleProcessStudio = async () => {
-    if (!bundleData) return;
-    setProcessingImages(true);
-
-    try {
-      const res = await fetch('/api/process-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ components: bundleData.components }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setStudioResult(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setProcessingImages(false);
-  };
-
-  // 3. Push to Shopify
-  const handlePushShopify = async () => {
-    if (!bundleData) return;
-    setPushingShopify(true);
-
-    try {
-      const res = await fetch('/api/push-to-shopify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bundleData }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('🚀 SUCCESS! ' + bundleData.bundleTitle + ' is now live on your Shopify store as a Virtual SKU!');
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setPushingShopify(false);
-  };
-
+export default function Home() {
   return (
-    <div style={{ background: '#07080C', color: '#F9FAFB', minHeight: '100vh', padding: '40px 8%', fontFamily: 'sans-serif' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '40px', alignItems: 'center' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          BundleOS Core v3.0
+    <div style={{ background: '#07080C', color: '#F9FAFB', minHeight: '100vh', fontFamily: 'sans-serif' }}>
+      {/* Navbar */}
+      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 8%', borderBottom: '1px solid #1E2330' }}>
+        <h1 style={{ fontSize: '22px', fontWeight: 'bold', background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          BundleOS
         </h1>
-        <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-          ● Live Engine Connected
+        <Link href="/dashboard">
+          <button style={{ background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+            Open App →
+          </button>
+        </Link>
+      </nav>
+
+      {/* Hero Section */}
+      <section style={{ textAlign: 'center', padding: '100px 8% 60px' }}>
+        <span style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#A78BFA', padding: '8px 16px', borderRadius: '20px', fontSize: '14px', border: '1px solid rgba(139, 92, 246, 0.3)' }}>
+          ✨ Next-Gen E-Commerce AI Engine
         </span>
-      </header>
+        <h2 style={{ fontSize: '48px', fontWeight: '800', marginTop: '24px', marginBottom: '16px', lineHeight: '1.2' }}>
+          Automate Your High-Margin <br />
+          <span style={{ background: 'linear-gradient(135deg, #60A5FA, #A78BFA)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            Product Bundles with AI
+          </span>
+        </h2>
+        <p style={{ fontSize: '18px', color: '#9CA3AF', maxWidth: '600px', margin: '0 auto 32px' }}>
+          Source multi-piece product systems, generate studio-grade AI visual assets, and push directly to your Shopify store in seconds.
+        </p>
+        <Link href="/dashboard">
+          <button style={{ background: '#10B981', color: 'black', padding: '16px 36px', border: 'none', borderRadius: '10px', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>
+            🚀 Launch BundleOS App
+          </button>
+        </Link>
+      </section>
 
-      <form onSubmit={handleSource} style={{ display: 'flex', gap: '12px', marginBottom: '40px' }}>
-        <input
-          type="text"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          style={{ flex: 1, padding: '16px', borderRadius: '8px', border: '1px solid #1E2330', background: '#10131E', color: 'white', fontSize: '16px', outline: 'none' }}
-          placeholder="Type your system prompt..."
-        />
-        <button type="submit" style={{ background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)', color: 'white', padding: '16px 28px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
-          {loading ? 'AI Scanning...' : 'Run Sourcing Engine'}
-        </button>
-      </form>
-
-      {bundleData && (
-        <div style={{ background: '#10131E', border: '1px solid #1E2330', borderRadius: '16px', padding: '30px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
-            <h2 style={{ fontSize: '20px', color: '#60A5FA' }}>{bundleData.bundleTitle}</h2>
-            <button
-              onClick={handlePushShopify}
-              type="button"
-              style={{ background: '#10B981', color: 'black', padding: '12px 20px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
-            >
-              {pushingShopify ? 'Pushing...' : '🛍️ Push Bundle to Shopify →'}
-            </button>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-            {bundleData.components.map((c: any) => (
-              <div key={c.id} style={{ background: '#151926', padding: '15px', borderRadius: '10px', border: '1px solid #232A3B' }}>
-                <img src={c.rawImage} alt={c.name} style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '6px', marginBottom: '10px' }} />
-                <h4 style={{ fontSize: '14px', marginBottom: '5px' }}>{c.name}</h4>
-                <p style={{ fontSize: '12px', color: '#9CA3AF' }}>Factory Cost: <b style={{ color: 'white' }}>${c.rawCost}</b></p>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(16, 185, 129, 0.08)', padding: '20px', borderRadius: '10px', border: '1px solid rgba(16, 185, 129, 0.25)', marginBottom: '30px', flexWrap: 'wrap', gap: '10px' }}>
-            <div>Total Landed: <b>${bundleData.financials.totalLandedCost}</b></div>
-            <div>Suggested Retail: <b>${bundleData.financials.suggestedRetail}</b></div>
-            <div style={{ color: '#10B981' }}>Gross Profit: <b>${bundleData.financials.grossProfit} ({bundleData.financials.grossMarginPercentage}%)</b></div>
-          </div>
-
-          <div style={{ borderTop: '1px solid #1E2330', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
-            <div>
-              <h3 style={{ fontSize: '16px' }}>AI Visual Studio Engine</h3>
-              <p style={{ fontSize: '13px', color: '#9CA3AF' }}>Remove factory backgrounds and generate a 3D studio hero shot.</p>
-            </div>
-            <button
-              onClick={handleProcessStudio}
-              type="button"
-              style={{ background: '#8B5CF6', color: 'white', padding: '12px 24px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              {processingImages ? 'Cleaning Images with AI...' : '✨ Enhance Images with AI Studio'}
-            </button>
-          </div>
-
-          {studioResult && (
-            <div style={{ marginTop: '30px', background: '#151926', padding: '20px', borderRadius: '12px', border: '1px solid #8B5CF6' }}>
-              <h3 style={{ color: '#C084FC', marginBottom: '15px' }}>✅ Shopify-Ready Studio Assets Generated</h3>
-              <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-                <img src={studioResult.heroStudioImage} alt="Hero Banner" style={{ width: '100%', maxHeight: '300px', objectFit: 'cover', borderRadius: '8px' }} />
-              </div>
-            </div>
-          )}
+      {/* Features Grid */}
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', padding: '40px 8% 100px' }}>
+        <div style={{ background: '#10131E', padding: '30px', borderRadius: '16px', border: '1px solid #1E2330' }}>
+          <h3 style={{ fontSize: '20px', color: '#60A5FA', marginBottom: '12px' }}>🎯 AI Sourcing Engine</h3>
+          <p style={{ color: '#9CA3AF', fontSize: '14px', lineHeight: '1.6' }}>
+            Turns simple text prompts into optimized 3-piece product bundles with full margin & landed cost breakdown.
+          </p>
         </div>
-      )}
+        <div style={{ background: '#10131E', padding: '30px', borderRadius: '16px', border: '1px solid #1E2330' }}>
+          <h3 style={{ fontSize: '20px', color: '#C084FC', marginBottom: '12px' }}>✨ Visual Studio AI</h3>
+          <p style={{ color: '#9CA3AF', fontSize: '14px', lineHeight: '1.6' }}>
+            Cleans factory image backgrounds instantly and converts them into high-converting e-commerce assets.
+          </p>
+        </div>
+        <div style={{ background: '#10131E', padding: '30px', borderRadius: '16px', border: '1px solid #1E2330' }}>
+          <h3 style={{ fontSize: '20px', color: '#34D399', marginBottom: '12px' }}>🛍️ 1-Click Shopify Sync</h3>
+          <p style={{ color: '#9CA3AF', fontSize: '14px', lineHeight: '1.6' }}>
+            Push your virtual SKUs directly into your Shopify inventory with GraphQL API precision.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }
