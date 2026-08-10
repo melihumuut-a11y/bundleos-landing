@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BundleOS | AI-Powered E-Commerce Bundle Sourcing Engine</title>
+    <style>
+        :root {
+            --bg-dark: #090A0F;
+            --bg-card: #12151E;
+            --accent-blue: #3B82F6;
+            --accent-purple: #8B5CF6;
+            --accent-green: #10B981;
+            --text-main: #F3F4F6;
+            --text-muted: #9CA3AF;
+            --border-color: #1F2937;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-main); line-height: 1.6; padding-bottom: 60px; }
+
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 18px 8%; border-bottom: 1px solid var(--border-color);
+            background: rgba(9, 10, 15, 0.95); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 100;
+        }
+
+        .logo { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero { padding: 60px 5% 40px 5%; text-align: center; max-width: 950px; margin: 0 auto; }
+        h1 { font-size: 44px; font-weight: 800; line-height: 1.2; margin-bottom: 20px; letter-spacing: -0.5px; }
+        h1 span { background: linear-gradient(135deg, #60A5FA, #C084FC); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero p { font-size: 18px; color: var(--text-muted); margin-bottom: 30px; }
+
+        .cta-container { display: flex; justify-content: center; gap: 10px; max-width: 650px; margin: 0 auto 20px auto; flex-wrap: wrap; }
+        input[type="text"] { flex: 1; min-width: 280px; padding: 14px 18px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card); color: white; font-size: 15px; outline: none; }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white; padding: 14px 24px; border-radius: 8px; border: none; font-size: 15px; font-weight: 700; cursor: pointer; transition: transform 0.2s;
+        }
+        .btn-primary:hover { transform: scale(1.02); }
+
+        .demo-window { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; max-width: 850px; margin: 0 auto 60px auto; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .prompt-box { background: #090A0F; border: 1px solid #1E293B; padding: 12px 16px; border-radius: 8px; font-family: monospace; color: #60A5FA; margin-bottom: 20px; font-size: 14px; word-break: break-all; }
+        
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .item-card { background: #1A1E2C; padding: 15px; border-radius: 8px; border: 1px solid #2D3748; }
+        .item-card h4 { font-size: 14px; color: var(--text-main); margin-bottom: 6px; }
+        .item-card p { font-size: 12px; color: var(--text-muted); }
+
+        .metrics-bar { display: flex; justify-content: space-between; align-items: center; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 15px; border-radius: 8px; color: var(--accent-green); font-weight: 700; font-size: 14px; flex-wrap: wrap; gap: 10px; }
+        
+        .loading-text { color: var(--accent-purple); font-weight: bold; text-align: center; display: none; padding: 15px; font-size: 15px; }
+        
+        /* New Sections */
+        .comparison-section { max-width: 900px; margin: 0 auto 80px auto; padding: 0 20px; }
+        .comparison-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 30px; }
+        .comp-card { background: var(--bg-card); padding: 25px; border-radius: 12px; border: 1px solid var(--border-color); }
+        .comp-card.old { border-color: #EF4444; }
+        .comp-card.new { border-color: var(--accent-green); background: rgba(16, 185, 129, 0.03); }
+        .comp-card h3 { font-size: 18px; margin-bottom: 15px; }
+        .comp-card ul { list-style: none; line-height: 2; font-size: 14px; color: var(--text-muted); }
+
+        .steps-section { max-width: 900px; margin: 0 auto 80px auto; text-align: center; padding: 0 20px; }
+        .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 30px; }
+        .step-card { background: var(--bg-card); border: 1px solid var(--border-color); padding: 25px; border-radius: 12px; text-align: left; }
+        .step-num { width: 32px; height: 32px; background: var(--accent-purple); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-bottom: 15px; }
+
+        .faq-section { max-width: 750px; margin: 0 auto 60px auto; padding: 0 20px; }
+        .faq-item { background: var(--bg-card); border: 1px solid var(--border-color); padding: 20px; border-radius: 8px; margin-bottom: 15px; }
+        .faq-item h4 { font-size: 16px; margin-bottom: 8px; color: white; }
+        .faq-item p { font-size: 14px; color: var(--text-muted); }
+
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
+        .modal-box { background: var(--bg-card); border: 2px solid var(--accent-purple); padding: 30px; border-radius: 16px; max-width: 420px; width: 90%; text-align: center; position: relative; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">BundleOS</div>
+        <button class="btn-primary" onclick="openModal()" style="padding: 8px 16px; font-size: 13px;">VIP Beta ($29)</button>
+    </header>
+
+    <section class="hero">
+        <div style="background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-block; margin-bottom: 15px; border: 1px solid rgba(139, 92, 246, 0.3);">🚀 LIVE AI SOURCING DEMO</div>
+        <h1>Type a Niche. Build a <span>$49 High-Margin Bundle</span> Instantly.</h1>
+        <p>Test our real-time AI sourcing engine below. Enter any product system prompt:</p>
+
+        <form class="cta-container" onsubmit="runDemo(event)">
+            <input type="text" id="userPrompt" value="Build a 3-piece dog cleaning system under $12 landed" required>
+            <button type="submit" class="btn-primary">Run AI Sourcing Engine</button>
+        </form>
+
+        <div id="loading" class="loading-text">⚡ AI Scanning 1688, CJdropshipping & Factory Databases...</div>
+
+        <div class="demo-window" id="demoConsole">
+            <div class="prompt-box" id="activePromptDisplay">PROMPT: "Build a 3-piece dog cleaning system under $12 landed"</div>
+
+            <div class="result-grid">
+                <div class="item-card">
+                    <h4 id="item1Name">Silicone Paw Cleaner Cup</h4>
+                    <p>Supplier: Shenzhen Factory A</p>
+                    <p>Unit Cost: <b id="item1Cost" style="color:white;">$3.20</b> | Stock: 14,500</p>
+                </div>
+                <div class="item-card">
+                    <h4 id="item2Name">Bath Massage Brush</h4>
+                    <p>Supplier: Ningbo Goods Ltd</p>
+                    <p>Unit Cost: <b id="item2Cost" style="color:white;">$1.80</b> | Stock: 8,200</p>
+                </div>
+                <div class="item-card">
+                    <h4 id="item3Name">Microfiber Drying Towel</h4>
+                    <p>Supplier: Yiwu Textile Co</p>
+                    <p>Unit Cost: <b id="item3Cost" style="color:white;">$1.90</b> | Stock: 22,000</p>
+                </div>
+            </div>
+
+            <div class="metrics-bar">
+                <span>Landed Cost: <b id="totalLanded" style="color:white;">$10.90</b></span>
+                <span>Retail Target: <b id="retailPrice" style="color:white;">$44.99</b></span>
+                <span>Gross Profit: <b id="grossProfit" style="color:white;">$34.09 (75.8%)</b></span>
+                <button onclick="openModal()" style="background: var(--accent-green); color: black; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: bold;">Push to Shopify →</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- BEFORE VS AFTER SECTION -->
+    <section class="comparison-section">
+        <h2 style="text-align: center; font-size: 28px;">Why Single-Item Dropshipping Is Dead</h2>
+        <div class="comparison-grid">
+            <div class="comp-card old">
+                <h3 style="color: #EF4444;">❌ Traditional Dropshipping</h3>
+                <ul>
+                    <li>❌ Sells 1 item for $19.99 (High Ad CAC)</li>
+                    <li>❌ Customer receives 3 separate packages</li>
+                    <li>❌ Shipping costs destroy profit margins</li>
+                    <li>❌ High return risk & 1-star reviews</li>
+                </ul>
+            </div>
+            <div class="comp-card new">
+                <h3 style="color: var(--accent-green);">✅ BundleOS System Method</h3>
+                <ul>
+                    <li>✅ Sells a 3-piece System for $44.99+ (High AOV)</li>
+                    <li>✅ 1 Consolidated Package with 1 Tracking Number</li>
+                    <li>✅ 70%+ Gross Profit Margin ($34+ profit/sale)</li>
+                    <li>✅ Perceived as a premium branded routine</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="steps-section">
+        <h2 style="font-size: 28px; margin-bottom: 10px;">How BundleOS Works in 3 Steps</h2>
+        <p style="color: var(--text-muted);">No manual product research. No supplier headache.</p>
+        <div class="steps-grid">
+            <div class="step-card">
+                <div class="step-num">1</div>
+                <h4>Type Your Niche Prompt</h4>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Describe the system you want (e.g. "Car Interior Rescue Kit under $10").</p>
+            </div>
+            <div class="step-card">
+                <div class="step-num">2</div>
+                <h4>AI Sourcing Match</h4>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Our AI pairs complementary factory SKUs and calculates real landed costs.</p>
+            </div>
+            <div class="step-card">
+                <div class="step-num">3</div>
+                <h4>1-Click Shopify Push</h4>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Export virtual bundle SKU to Shopify. Orders route to 1-package fulfillment.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ SECTION -->
+    <section class="faq-section">
+        <h2 style="text-align: center; font-size: 28px; margin-bottom: 30px;">Frequently Asked Questions</h2>
+        <div class="faq-item">
+            <h4>Can I use BundleOS alongside DSers or CJdropshipping?</h4>
+            <p>Yes. BundleOS works as the intelligence and bundle-creation layer. Orders are routed seamlessly to your preferred suppliers or our consolidated warehouses.</p>
+        </div>
+        <div class="faq-item">
+            <h4>How does 1-package fulfillment work for 3 different items?</h4>
+            <p>Our backend orchestrates transit warehouses in Shenzhen and Yiwu. Items are collected within 24 hours and shipped in a single custom box to your US customer.</p>
+        </div>
+        <div class="faq-item">
+            <h4>Is the $29 price a monthly fee or lifetime?</h4>
+            <p>Early VIP Beta members lock in the $29/mo founding rate for life before our public Shopify App Store launch ($79/mo value).</p>
+        </div>
+    </section>
+
+    <!-- MODAL -->
+    <div class="modal-overlay" id="paymentModal">
+        <div class="modal-box">
+            <h3 style="margin-bottom: 10px;">Reserve VIP Beta Access</h3>
+            <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Push unlimited AI-generated bundles directly to your Shopify store with 1-package fulfillment.</p>
+            <div style="font-size: 38px; font-weight: 800; margin-bottom: 20px; color: white;">$29 <span style="font-size: 14px; color: var(--text-muted); font-weight: normal;">/ lifetime locked</span></div>
+            <button class="btn-primary" style="width: 100%; margin-bottom: 12px;" onclick="window.location.href='https://buy.stripe.com/test_link'">Pay $29 & Connect Shopify</button>
+            <button onclick="closeModal()" style="background: transparent; color: var(--text-muted); border: none; cursor: pointer; font-size: 13px;">Close Window</button>
+        </div>
+    </div>
+
+    <script>
+        function runDemo(e) {
+            e.preventDefault();
+            const prompt = document.getElementById('userPrompt').value;
+            const loading = document.getElementById('loading');
+            const demoConsole = document.getElementById('demoConsole');
+
+            loading.style.display = 'block';
+            demoConsole.style.opacity = '0.3';
+
+            setTimeout(() => {
+                document.getElementById('activePromptDisplay').innerText = 'PROMPT: "' + prompt + '"';
+                
+                if(prompt.toLowerCase().includes('car') || prompt.toLowerCase().includes('araba')) {
+                    document.getElementById('item1Name').innerText = 'Vent Detailing Gel'; document.getElementById('item1Cost').innerText = '$1.50';
+                    document.getElementById('item2Name').innerText = 'Microfiber Towel Set'; document.getElementById('item2Cost').innerText = '$2.10';
+                    document.getElementById('item3Name').innerText = 'Leather Wipe Brush'; document.getElementById('item3Cost').innerText = '$2.30';
+                    document.getElementById('totalLanded').innerText = '$9.90';
+                    document.getElementById('grossProfit').innerText = '$30.09 (75.2%)';
+                } else if(prompt.toLowerCase().includes('cat') || prompt.toLowerCase().includes('kedi')) {
+                    document.getElementById('item1Name').innerText = 'Cat Hair Grooming Glove'; document.getElementById('item1Cost').innerText = '$1.20';
+                    document.getElementById('item2Name').innerText = 'Deshedding Comb'; document.getElementById('item2Cost').innerText = '$2.40';
+                    document.getElementById('item3Name').innerText = 'Paw Cleaning Wipes'; document.getElementById('item3Cost').innerText = '$1.80';
+                    document.getElementById('totalLanded').innerText = '$8.90';
+                    document.getElementById('grossProfit').innerText = '$36.09 (80.2%)';
+                } else {
+                    document.getElementById('item1Name').innerText = 'Silicone Paw Cleaner Cup'; document.getElementById('item1Cost').innerText = '$3.20';
+                    document.getElementById('item2Name').innerText = 'Bath Massage Brush'; document.getElementById('item2Cost').innerText = '$1.80';
+                    document.getElementById('item3Name').innerText = 'Microfiber Drying Towel'; document.getElementById('item3Cost').innerText = '$1.90';
+                    document.getElementById('totalLanded').innerText = '$10.90';
+                    document.getElementById('grossProfit').innerText = '$34.09 (75.8%)';
+                }
+
+                loading.style.display = 'none';
+                demoConsole.style.opacity = '1';
+            }, 1000);
+        }
+
+        function openModal() { document.getElementById('paymentModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('paymentModal').style.display = 'none'; }
+    </script>
+</body>
+</html>
