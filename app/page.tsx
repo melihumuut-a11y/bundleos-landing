@@ -6,12 +6,16 @@ export default function Home() {
   const [orders, setOrders] = useState(644);
   const [prompt, setPrompt] = useState('Build a 3-piece dog cleaning system under $12 landed');
   const [loading, setLoading] = useState(false);
+  const [processingImages, setProcessingImages] = useState(false);
+  const [pushingShopify, setPushingShopify] = useState(false);
+  const [studioResult, setStudioResult] = useState<any>(null);
+
   const [bundleData, setBundleData] = useState<any>({
     bundleTitle: "BUILD A 3-PIECE DOG CLEANING SYSTEM UNDER $12 LANDED",
     components: [
-      { id: "sku-1", name: "Silicone Paw Cleaner Cup", supplier: "Shenzhen Factory A", rawCost: 3.20, stock: "14,500", rawImage: "https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=500" },
-      { id: "sku-2", name: "Bath Massage Brush", supplier: "Ningbo Goods Ltd", rawCost: 1.80, stock: "8,200", rawImage: "https://images.unsplash.com/photo-1544568100-847a948585b9?w=500" },
-      { id: "sku-3", name: "Microfiber Drying Towel", supplier: "Yiwu Textile Co", rawCost: 1.90, stock: "22,000", rawImage: "https://images.unsplash.com/photo-1535294435445-d7249524ef2e?w=500" }
+      { id: "sku-1", name: "Silicone Paw Cleaner Cup", supplier: "Shenzhen Factory A", rawCost: 3.20, stock: "14,500 units" },
+      { id: "sku-2", name: "Bath Massage Brush", supplier: "Ningbo Goods Ltd", rawCost: 1.80, stock: "8,200 units" },
+      { id: "sku-3", name: "Microfiber Drying Towel", supplier: "Yiwu Textile Co", rawCost: 1.90, stock: "22,000 units" }
     ],
     financials: {
       totalLandedCost: 10.90,
@@ -21,45 +25,17 @@ export default function Home() {
     }
   });
 
-  const [processingImages, setProcessingImages] = useState(false);
-  const [studioResult, setStudioResult] = useState<any>(null);
-  const [pushingShopify, setPushingShopify] = useState(false);
-
   const singleProfit = Math.round(orders * 12);
   const bundleProfit = Math.round(orders * 34);
 
-  // 1. AI Sourcing Engine
-  const handleSource = async (e: any) => {
-    e.preventDefault();
-    setLoading(true);
-    setStudioResult(null);
-
-    try {
-      const res = await fetch('/api/generate-bundle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setBundleData(data);
-      }
-    } catch (err) {
-      console.error("Sourcing Error:", err);
-    }
-    setLoading(false);
-  };
-
-  // 2. AI Visual Studio Engine (Prompt parametresi eklendi)
-  const handleProcessStudio = async () => {
-    if (!bundleData) return;
+  // 1. DİNAMİK GÖRSEL ÇEKİCİ (POLLINATIONS AI - UNBOUND CACHE)
+  const fetchStudioImage = async (components: any, currentPrompt: string) => {
     setProcessingImages(true);
-
     try {
       const res = await fetch('/api/process-images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ components: bundleData.components, prompt }),
+        body: JSON.stringify({ components, prompt: currentPrompt }),
       });
       const data = await res.json();
       if (data.success) {
@@ -71,7 +47,41 @@ export default function Home() {
     setProcessingImages(false);
   };
 
-  // 3. Shopify Push Engine
+  // 2. OTOMATİK DİNAMİK ARAMA VE GÖRSEL YENİLEME
+  const handleSource = async (e: any) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+
+    setLoading(true);
+    setStudioResult(null);
+
+    try {
+      const res = await fetch('/api/generate-bundle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setBundleData(data);
+        // Ürün verileri gelir gelmez anında o konuya özel CANLI STÜDYO GÖRSELİ de üretilir
+        fetchStudioImage(data.components, prompt);
+      }
+    } catch (err) {
+      console.error("Sourcing Error:", err);
+    }
+    setLoading(false);
+  };
+
+  // 3. MANUEL GÖRSEL YENİLEME
+  const handleProcessStudio = () => {
+    if (bundleData) {
+      fetchStudioImage(bundleData.components, prompt);
+    }
+  };
+
+  // 4. SHOPIFY PUSH ENGINE
   const handlePushShopify = async () => {
     if (!bundleData) return;
     setPushingShopify(true);
@@ -170,9 +180,8 @@ export default function Home() {
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', textAlign: 'left' }}>
             
-            {/* OLD WAY */}
             <div style={{ background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '16px', padding: '28px' }}>
-              <h3 style={{ color: '#EF4444', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ color: '#EF4444', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px' }}>
                 ❌ Old Way (DSers / Single Items)
               </h3>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '14px', color: '#D1D5DB' }}>
@@ -183,9 +192,8 @@ export default function Home() {
               </ul>
             </div>
 
-            {/* BUNDLEOS WAY */}
             <div style={{ background: 'rgba(34, 197, 94, 0.03)', border: '1px solid rgba(34, 197, 94, 0.2)', borderRadius: '16px', padding: '28px' }}>
-              <h3 style={{ color: '#22C55E', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ color: '#22C55E', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px' }}>
                 ✅ BundleOS System Method
               </h3>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '14px', color: '#D1D5DB' }}>
@@ -199,7 +207,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* CONSOLE TERMINAL (LIVE AI APP) */}
+        {/* CONSOLE TERMINAL (LIVE AI SEARCH ENGINE) */}
         <div id="console" style={{ background: '#0D111A', border: '1px solid #1E2638', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)', textAlign: 'left' }}>
           
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #1A2130', paddingBottom: '12px' }}>
@@ -209,7 +217,7 @@ export default function Home() {
               <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#10B981' }}></div>
             </div>
             <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace' }}>
-              Console v2.4 • Connected to Shenzhen Transit Hub
+              Console v2.4 • Connected to Live Sourcing Engine
             </span>
           </div>
 
@@ -223,7 +231,7 @@ export default function Home() {
                 style={{ flex: 1, background: 'transparent', border: 'none', color: '#F3F4F6', fontSize: '14px', outline: 'none', fontFamily: 'monospace' }}
               />
               <button type="submit" style={{ background: '#38BDF8', color: '#090B10', padding: '8px 16px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
-                {loading ? 'Scanning...' : 'Run Engine'}
+                {loading ? 'Scanning Engine...' : 'Run Engine'}
               </button>
             </div>
           </form>
@@ -233,7 +241,7 @@ export default function Home() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                 {bundleData.components.map((c: any) => (
                   <div key={c.id} style={{ background: '#121724', border: '1px solid #212B3E', borderRadius: '10px', padding: '16px' }}>
-                    <h4 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '4px' }}>{c.name}</h4>
+                    <h4 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '6px' }}>{c.name}</h4>
                     <p style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '12px' }}>Supplier: {c.supplier || 'China Factory'}</p>
                     <div style={{ fontSize: '12px', color: '#D1D5DB' }}>
                       Unit Cost: <b style={{ color: 'white' }}>${c.rawCost}</b> | Stock: <b>{c.stock || '10,000+'}</b>
@@ -257,20 +265,25 @@ export default function Home() {
                 </button>
               </div>
 
-              <div style={{ marginTop: '20px', borderTop: '1px solid #1E2638', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: '#9CA3AF' }}>AI Visual Studio Engine</span>
+              <div style={{ marginTop: '24px', borderTop: '1px solid #1E2638', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '13px', color: '#9CA3AF', fontWeight: 'bold' }}>AI Visual Studio Engine</span>
                 <button
                   onClick={handleProcessStudio}
                   type="button"
                   style={{ background: '#8B5CF6', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
                 >
-                  {processingImages ? 'Generating Dynamic Studio Art...' : '✨ Enhance Studio Images'}
+                  {processingImages ? 'Rendering Studio Art...' : '✨ Enhance Studio Images'}
                 </button>
               </div>
 
+              {/* CANLI DİNAMİK STÜDYO GÖRSELİ */}
               {studioResult && (
-                <div style={{ marginTop: '16px', background: '#161C2B', padding: '16px', borderRadius: '8px', border: '1px solid #8B5CF6' }}>
-                  <img src={studioResult.heroStudioImage} alt="Dynamic Studio Asset" style={{ width: '100%', maxHeight: '300px', objectFit: 'cover', borderRadius: '6px' }} />
+                <div style={{ marginTop: '16px', background: '#161C2B', padding: '12px', borderRadius: '10px', border: '1px solid #8B5CF6', overflow: 'hidden' }}>
+                  <img 
+                    src={studioResult.heroStudioImage} 
+                    alt="Dynamic Studio Asset" 
+                    style={{ width: '100%', maxHeight: '350px', objectFit: 'cover', borderRadius: '8px', display: 'block' }} 
+                  />
                 </div>
               )}
             </div>
