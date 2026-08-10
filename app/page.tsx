@@ -108,8 +108,32 @@ export default function Home() {
 
       <main style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px 20px' }}>
         
+        {/* HERO SECTION (TANITICI GİRİŞ KISMI) */}
+        <div style={{ textAlign: 'center', padding: '40px 0 60px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(56, 189, 248, 0.1)', color: '#38BDF8', padding: '8px 16px', borderRadius: '30px', fontSize: '13px', border: '1px solid rgba(56, 189, 248, 0.2)', marginBottom: '24px' }}>
+            ⚡ Next-Gen E-Commerce Automation Engine
+          </div>
+          <h1 style={{ fontSize: '52px', fontWeight: '800', lineHeight: '1.15', letterSpacing: '-1.5px', marginBottom: '20px' }}>
+            Turn Single Products into <br />
+            <span style={{ background: 'linear-gradient(135deg, #38BDF8, #818CF8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              High-Margin AI Bundle Systems
+            </span>
+          </h1>
+          <p style={{ fontSize: '18px', color: '#9CA3AF', maxWidth: '680px', margin: '0 auto 36px', lineHeight: '1.6' }}>
+            Source multi-component systems, generate studio-grade AI visuals, and push virtual SKUs straight to your Shopify store in seconds.
+          </p>
+          <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <a href="#console" style={{ background: '#3B82F6', color: 'white', padding: '14px 28px', borderRadius: '10px', fontWeight: 'bold', textDecoration: 'none', fontSize: '15px' }}>
+              🚀 Try Live Demo Below
+            </a>
+            <a href="#calculator" style={{ background: '#111520', color: '#9CA3AF', border: '1px solid #1E2638', padding: '14px 28px', borderRadius: '10px', fontWeight: 'bold', textDecoration: 'none', fontSize: '15px' }}>
+              📊 Calculate Revenue Impact
+            </a>
+          </div>
+        </div>
+
         {/* REVENUE CALCULATOR CARD */}
-        <div style={{ background: '#111520', border: '1px solid #1E2638', borderRadius: '16px', padding: '40px 30px', textAlign: 'center', marginBottom: '60px' }}>
+        <div id="calculator" style={{ background: '#111520', border: '1px solid #1E2638', borderRadius: '16px', padding: '40px 30px', textAlign: 'center', marginBottom: '60px' }}>
           <h2 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '8px' }}>Calculate Your Revenue Increase</h2>
           <p style={{ color: '#9CA3AF', fontSize: '14px', marginBottom: '32px' }}>
             See how switching from single items to 3-piece systems impacts your bottom line.
@@ -177,7 +201,7 @@ export default function Home() {
         </div>
 
         {/* CONSOLE TERMINAL (LIVE AI APP) */}
-        <div style={{ background: '#0D111A', border: '1px solid #1E2638', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)', textAlign: 'left' }}>
+        <div id="console" style={{ background: '#0D111A', border: '1px solid #1E2638', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)', textAlign: 'left' }}>
           
           {/* MAC TERMINAL DOTS */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #1A2130', paddingBottom: '12px' }}>
