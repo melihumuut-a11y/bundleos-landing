@@ -303,6 +303,12 @@ function SearchStage({
   loading: boolean;
 }) {
   const [focused, setFocused] = useState(false);
+  const [ctaHover, setCtaHover] = useState(false);
+  const ctaFilled = ctaHover && !loading;
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") onSubmit();
+  };
 
   return (
     <div className="mx-auto mt-16 max-w-2xl">
@@ -312,9 +318,7 @@ function SearchStage({
           onChange={(e) => setPrompt(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit();
-          }}
+          onKeyDown={handleKeyDown}
           placeholder="Describe the bundle — “3-piece ceramic car detailing system”"
           className="w-full bg-transparent pb-4 pt-2 text-center text-lg outline-none sm:text-xl"
           style={{
@@ -355,18 +359,14 @@ function SearchStage({
         <button
           onClick={onSubmit}
           disabled={loading || !prompt.trim()}
+          onMouseEnter={() => setCtaHover(true)}
+          onMouseLeave={() => setCtaHover(false)}
           className="border px-8 py-3 text-[11px] uppercase transition-colors duration-300 disabled:opacity-30"
           style={{
             letterSpacing: "0.25em",
             borderColor: palette.brass,
-            color: loading ? palette.brass : palette.ivory,
-            background: "transparent",
-          }}
-          onMouseEnter={(e) => {
-            if (!loading) e.currentTarget.style.background = palette.brass;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
+            color: ctaFilled ? palette.stage : palette.ivory,
+            background: ctaFilled ? palette.brass : "transparent",
           }}
         >
           {loading ? "Sourcing…" : "Discover the bundle"}
@@ -481,7 +481,7 @@ function ProductLot({ lot, product }: { lot: string; product: Product }) {
 
         <div className="mt-6">
           {product.productUrl ? (
-            
+            <a
               href={product.productUrl}
               target="_blank"
               rel="noopener noreferrer"
@@ -714,7 +714,7 @@ function EmptyState({ prompt }: { prompt: string }) {
   return (
     <div className="mx-auto mt-24 max-w-md text-center">
       <p className="text-sm leading-relaxed" style={{ color: palette.muted }}>
-        Nothing was sourced live for "{prompt}." Check the status line above,
+        Nothing was sourced live for “{prompt}.” Check the status line above,
         or refine the search.
       </p>
     </div>
