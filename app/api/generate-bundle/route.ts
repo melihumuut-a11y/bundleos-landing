@@ -1,5 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Route handlers that read the request body (POST, as here) are never
+// statically optimized by Next.js — but this is harmless to set explicitly
+// and guarantees process.env is evaluated fresh on every invocation rather
+// than at build time in any edge case.
+export const dynamic = "force-dynamic";
+
+// ---------------------------------------------------------------------------
+// Env var resolution
+// ---------------------------------------------------------------------------
+// If a key you set in Vercel isn't showing up here, it is almost never a
+// naming-format problem — env var names are case-sensitive and Vercel does
+// not rename them. The two real causes, in order of likelihood:
+//   1. You added/changed the variable but didn't trigger a new deployment.
+//      Vercel snapshots env vars into the build; existing deployments keep
+//      running with the OLD snapshot until you redeploy.
+//   2. The variable is scoped to the wrong environment (Production vs.
+//      Preview vs. Development) relative to the URL you're testing.
+// This resolver still helps with a real, common issue: a trailing newline
+// or space pasted into the Vercel dashboard, which makes the key "present"
+// but invalid. It also accepts a couple of plausible alternate names in
+// case you named the var differently — but never a NEXT_PUBLIC_-prefixed
+// one, because that prefix bundles the value into client-side JS and would
+// leak your secret key to every visitor's browser.
+function resolveServerEnvKey(candidateNames: string[]): {
+  value: string | null;
+  matchedName: string | null;
+} {
+  for (const name of candidateNames) {
+    const raw = process.env[name];
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed.length > 0) {
+        return { value: trimmed, matchedName: name };
+      }
+    }
+  }
+  return { value: null, matchedName: null };
+}
+
+const CJ_KEY_CANDIDATES = ["CJ_API_KEY", "CJ_APIKEY", "CJ_DROPSHIPPING_API_KEY"];
+const RAPIDAPI_KEY_CANDIDATES = ["RAPIDAPI_KEY", "RAPID_API_KEY"];
+const AUTODS_KEY_CANDIDATES = ["AUTODS_API_KEY"];
+const AUTODS_BASE_URL_CANDIDATES = ["AUTODS_API_BASE_URL"];
+
 // ---------------------------------------------------------------------------
 // IMPORTANT — read before wiring AutoDS
 // ---------------------------------------------------------------------------
@@ -65,9 +109,28 @@ interface BundleResponse {
 
 let cachedCjToken: { token: string; expiresAt: number } | null = null;
 
+// A structured error that carries CJ's own response through unchanged, so
+// the route can surface CJ's exact code/message instead of a generic one.
+class CjApiError extends Error {
+  cjCode?: number;
+  cjMessage?: string;
+  httpStatus?: number;
+  constructor(message: string, opts?: { cjCode?: number; cjMessage?: string; httpStatus?: number }) {
+    super(message);
+    this.name = "CjApiError";
+    this.cjCode = opts?.cjCode;
+    this.cjMessage = opts?.cjMessage;
+    this.httpStatus = opts?.httpStatus;
+  }
+}
+
 async function getCjAccessToken(): Promise<string> {
-  const apiKey = process.env.CJ_API_KEY;
-  if (!apiKey) throw new Error("CJ_API_KEY not configured");
+  const { value: apiKey, matchedName } = resolveServerEnvKey(CJ_KEY_CANDIDATES);
+  if (!apiKey) {
+    throw new CjApiError(
+      `No CJ API key found. Checked: ${CJ_KEY_CANDIDATES.join(", ")}. Set one of these in Vercel and redeploy.`
+    );
+  }
 
   if (cachedCjToken && cachedCjToken.expiresAt > Date.now()) {
     return cachedCjToken.token;
@@ -83,12 +146,26 @@ async function getCjAccessToken(): Promise<string> {
     }
   );
 
-  if (!res.ok) throw new Error(`CJ auth failed with status ${res.status}`);
+  // CJ returns 200 with { result: false, code, message } for most business
+  // errors (bad key, unauthorized, etc.) rather than a 4xx HTTP status, so
+  // we must inspect the body even when res.ok is true.
+  const data = await res.json().catch(() => null);
 
-  const data = await res.json();
-  const token: string | undefined = data?.data?.accessToken;
-  if (!token) throw new Error("CJ auth response missing accessToken");
+  if (!res.ok) {
+    throw new CjApiError(
+      `CJ auth request failed (HTTP ${res.status}): ${data?.message ?? "no body"}`,
+      { httpStatus: res.status, cjCode: data?.code, cjMessage: data?.message }
+    );
+  }
 
+  if (data?.result !== true || !data?.data?.accessToken) {
+    throw new CjApiError(
+      `CJ auth rejected the key (env var matched: ${matchedName}) — CJ code ${data?.code}: "${data?.message}"`,
+      { cjCode: data?.code, cjMessage: data?.message, httpStatus: res.status }
+    );
+  }
+
+  const token: string = data.data.accessToken;
   cachedCjToken = { token, expiresAt: Date.now() + 12 * 60 * 60 * 1000 };
   return token;
 }
@@ -108,9 +185,14 @@ async function getFirstVariantId(
     headers: { "CJ-Access-Token": token },
     cache: "no-store",
   });
-  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok || data?.result !== true) {
+    console.warn(
+      `[CJ] variant/query failed for pid=${pid} — code ${data?.code}: "${data?.message}"`
+    );
+    return null;
+  }
 
-  const data = await res.json();
   const variants: any[] = Array.isArray(data?.data) ? data.data : [];
   return variants[0]?.vid ?? null;
 }
@@ -127,9 +209,14 @@ async function getVariantStock(token: string, vid: string): Promise<number | nul
     headers: { "CJ-Access-Token": token },
     cache: "no-store",
   });
-  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok || data?.result !== true) {
+    console.warn(
+      `[CJ] stock/queryByVid failed for vid=${vid} — code ${data?.code}: "${data?.message}"`
+    );
+    return null;
+  }
 
-  const data = await res.json();
   const rows: any[] = Array.isArray(data?.data) ? data.data : [];
   if (rows.length === 0) return null;
 
@@ -162,9 +249,14 @@ async function getVariantShippingCost(
       cache: "no-store",
     }
   );
-  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok || data?.result !== true) {
+    console.warn(
+      `[CJ] freightCalculate failed for vid=${vid} → ${destinationCountry} — code ${data?.code}: "${data?.message}"`
+    );
+    return null;
+  }
 
-  const data = await res.json();
   const options: any[] = Array.isArray(data?.data) ? data.data : [];
   if (options.length === 0) return null;
 
@@ -196,9 +288,15 @@ async function fetchCjProducts(
     cache: "no-store",
   });
 
-  if (!res.ok) throw new Error(`CJ product search failed with status ${res.status}`);
+  const data = await res.json().catch(() => null);
 
-  const data = await res.json();
+  if (!res.ok || data?.result !== true) {
+    throw new CjApiError(
+      `CJ product search failed — CJ code ${data?.code}: "${data?.message}" (HTTP ${res.status})`,
+      { httpStatus: res.status, cjCode: data?.code, cjMessage: data?.message }
+    );
+  }
+
   const list: any[] = data?.data?.list ?? [];
 
   // Enrich each product with real stock + real shipping cost. Done in
@@ -438,13 +536,31 @@ export async function POST(request: NextRequest) {
     autods: "skipped_no_key",
   };
 
-  if (!process.env.CJ_API_KEY) {
-    warnings.push("CJ_API_KEY is not set — skipping CJ Dropshipping.");
+  const cjKey = resolveServerEnvKey(CJ_KEY_CANDIDATES);
+  const rapidApiKey = resolveServerEnvKey(RAPIDAPI_KEY_CANDIDATES);
+  const autodsKey = resolveServerEnvKey(AUTODS_KEY_CANDIDATES);
+  const autodsBaseUrl = resolveServerEnvKey(AUTODS_BASE_URL_CANDIDATES);
+
+  // Non-secret debug signal: which env var name (if any) actually matched.
+  // This tells you immediately whether the problem is "no value visible to
+  // this deployment" vs. "value visible but CJ rejected it" — never logs or
+  // returns the key value itself.
+  const envDebug = {
+    cjKeyFound: cjKey.value !== null,
+    cjKeyMatchedName: cjKey.matchedName,
+    rapidApiKeyFound: rapidApiKey.value !== null,
+    autodsConfigured: autodsKey.value !== null && autodsBaseUrl.value !== null,
+  };
+
+  if (!cjKey.value) {
+    warnings.push(
+      `No CJ key found under any of: ${CJ_KEY_CANDIDATES.join(", ")}. If you just added it in Vercel, redeploy — env var changes don't apply to already-running deployments. Also confirm it's scoped to the environment (Production/Preview) you're testing.`
+    );
   }
-  if (!process.env.RAPIDAPI_KEY) {
-    warnings.push("RAPIDAPI_KEY is not set — skipping AliExpress.");
+  if (!rapidApiKey.value) {
+    warnings.push("No RapidAPI key found (RAPIDAPI_KEY / RAPID_API_KEY) — skipping AliExpress.");
   }
-  if (!process.env.AUTODS_API_KEY || !process.env.AUTODS_API_BASE_URL) {
+  if (!autodsKey.value || !autodsBaseUrl.value) {
     warnings.push(
       "AUTODS_API_KEY / AUTODS_API_BASE_URL not set — skipping AutoDS. Note: these are only issued after AutoDS approves your API application."
     );
@@ -453,15 +569,15 @@ export async function POST(request: NextRequest) {
   const tasks: Array<Promise<NormalizedProduct[]>> = [];
   const taskNames: Array<keyof typeof platformStatus> = [];
 
-  if (process.env.CJ_API_KEY) {
+  if (cjKey.value) {
     tasks.push(fetchCjProducts(prompt, destinationCountry));
     taskNames.push("cjdropshipping");
   }
-  if (process.env.RAPIDAPI_KEY) {
+  if (rapidApiKey.value) {
     tasks.push(fetchAliExpressProducts(prompt));
     taskNames.push("aliexpress");
   }
-  if (process.env.AUTODS_API_KEY && process.env.AUTODS_API_BASE_URL) {
+  if (autodsKey.value && autodsBaseUrl.value) {
     tasks.push(fetchAutoDsProducts(prompt));
     taskNames.push("autods");
   }
@@ -476,7 +592,16 @@ export async function POST(request: NextRequest) {
       products.push(...result.value);
     } else {
       platformStatus[name] = "failed";
-      warnings.push(`${name} request failed: ${String(result.reason?.message ?? result.reason)}`);
+      const reason = result.reason;
+      // Surface CJ's own error code/message verbatim when we have one,
+      // instead of a generic "request failed" string.
+      if (reason instanceof CjApiError) {
+        warnings.push(
+          `${name} failed — CJ code ${reason.cjCode ?? "n/a"}: "${reason.cjMessage ?? reason.message}" (HTTP ${reason.httpStatus ?? "n/a"})`
+        );
+      } else {
+        warnings.push(`${name} request failed: ${String(reason?.message ?? reason)}`);
+      }
     }
   });
 
@@ -486,13 +611,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const response: BundleResponse = {
+  const response: BundleResponse & { envDebug: typeof envDebug } = {
     prompt,
     products: products.slice(0, 3),
     financials: computeFinancials(products),
     platformStatus,
     warnings,
     generatedAt: new Date().toISOString(),
+    envDebug,
   };
 
   return NextResponse.json(response, { status: products.length > 0 ? 200 : 502 });
