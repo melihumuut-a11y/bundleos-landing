@@ -31,7 +31,6 @@ interface BundleResponse {
   generatedAt: string;
 }
 
-// Canlı akış (ticker) simülasyonu için global lüks işlemler
 const LIVE_TRANSACTIONS = [
   "⚡ [CJ-CN WAREHOUSE] 48x 'Ceramic Car Kit' dispatched to Miami, FL — Landed Margin: +68%",
   "🔥 [ALIEXPRESS HUB] Bundle Sourced: Pet Grooming Suite — Wholesale: $12.40 | Retail: $49.99",
@@ -48,7 +47,6 @@ export default function Home() {
   const [studioResult, setStudioResult] = useState<any>(null);
   const [tickerIndex, setTickerIndex] = useState(0);
 
-  // Canlı akış ticker'ını yukarıdan kaydırarak döndüren döngü
   useEffect(() => {
     const interval = setInterval(() => {
       setTickerIndex((prev) => (prev + 1) % LIVE_TRANSACTIONS.length);
@@ -102,11 +100,11 @@ export default function Home() {
   return (
     <div style={{ background: '#080F14', color: '#F2ECDD', minHeight: '100vh', fontFamily: 'monospace', overflowX: 'hidden' }}>
       
-      {/* 🚀 EN ÜSTTE SÜREKLİ AKAN CANLI ALIŞVERİŞ / LÜKS OPERASYON TICKER'I */}
+      {/* CANLI DÖNEN YUKARI TİCKER AKIŞI */}
       <div style={{ background: '#E2A63B', color: '#080F14', padding: '8px 16px', fontSize: '12px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', letterSpacing: '0.5px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ background: '#080F14', color: '#E2A63B', padding: '2px 6px', fontSize: '10px', borderRadius: '2px' }}>LIVE FEED</span>
-          <span style={{ transition: 'opacity 0.5s ease-in-out' }}>{LIVE_TRANSACTIONS[tickerIndex]}</span>
+          <span>{LIVE_TRANSACTIONS[tickerIndex]}</span>
         </div>
         <div style={{ display: 'flex', gap: '15px', textTransform: 'uppercase', fontSize: '10px' }}>
           <span>GLOBAL STATUS: SECURE</span>
@@ -114,7 +112,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* HEADER / BRANDING */}
+      {/* HEADER */}
       <header style={{ maxWidth: '1200px', margin: '0 auto', padding: '30px 20px', borderBottom: '1px dashed #203542', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
         <div>
           <span style={{ color: '#E2A63B', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '2px' }}>PRIVATE SOURCING ATELIER</span>
@@ -140,7 +138,7 @@ export default function Home() {
 
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px 100px' }}>
         
-        {/* HERO SECTION */}
+        {/* HERO */}
         <div style={{ textAlign: 'center', marginBottom: '40px' }}>
           <h2 style={{ fontSize: '38px', fontWeight: '800', color: '#FFFFFF', marginBottom: '12px', letterSpacing: '-1px' }}>
             Curated sourcing, <i style={{ color: '#E2A63B', fontFamily: 'serif' }}>delivered quietly.</i>
@@ -150,7 +148,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* RESPONSIVE SEARCH & SHIP TO FORM */}
+        {/* SEARCH FORM */}
         <form onSubmit={handleSearch} style={{ background: '#0F1C24', border: '2px solid #203542', padding: '16px', borderRadius: '6px', marginBottom: '40px', display: 'flex', gap: '12px', flexWrap: 'wrap', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
           
           <div style={{ flex: 1, minWidth: '280px', display: 'flex', alignItems: 'center', background: '#080F14', border: '1px solid #203542', padding: '0 14px', borderRadius: '4px' }}>
@@ -183,13 +181,13 @@ export default function Home() {
           <button
             type="submit"
             disabled={loading}
-            style={{ background: '#E2A63B', color: '#080F14', border: 'none', padding: '0 28px', fontWeight: '900', cursor: 'pointer', fontFamily: 'monospace', fontSize: '14px', borderRadius: '4px', transition: 'all 0.2s', width: '100%', sm: { width: 'auto' } }}
+            style={{ background: '#E2A63B', color: '#080F14', border: 'none', padding: '14px 28px', fontWeight: '900', cursor: 'pointer', fontFamily: 'monospace', fontSize: '14px', borderRadius: '4px', transition: 'all 0.2s', width: '100%' }}
           >
             {loading ? 'EXECUTING PIPELINE...' : 'DISCOVER BUNDLE ↵'}
           </button>
         </form>
 
-        {/* WARNINGS / ERRORS */}
+        {/* WARNINGS */}
         {data?.warnings && data.warnings.length > 0 && (
           <div style={{ background: 'rgba(226, 166, 59, 0.08)', border: '1px solid #E2A63B', padding: '14px 18px', borderRadius: '4px', marginBottom: '30px', fontSize: '12px', color: '#E2A63B' }}>
             <b>⚠️ PIPELINE STATUS & DIAGNOSTICS:</b>
@@ -213,12 +211,10 @@ export default function Home() {
               {data.products.map((item, idx) => (
                 <div key={idx} style={{ background: '#F2ECDD', color: '#080F14', borderRadius: '4px', border: '2px solid #080F14', padding: '18px', position: 'relative', boxShadow: '6px 6px 0px #080F14' }}>
                   
-                  {/* STAMP BADGE */}
                   <div style={{ position: 'absolute', top: '12px', right: '12px', background: '#080F14', color: '#E2A63B', padding: '3px 8px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
                     {item.source}
                   </div>
 
-                  {/* IMAGE */}
                   <div style={{ width: '100%', height: '190px', background: '#DCD4C0', marginBottom: '14px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #080F14' }}>
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
