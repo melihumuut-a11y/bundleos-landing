@@ -1,158 +1,157 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // ---------------------------------------------------------------------------
-// Types
+// Interfaces
 // ---------------------------------------------------------------------------
 
 interface BundleComponent {
   id: string;
   name: string;
   supplier: string;
-  supplierLocation: string;
   rawCost: number;
-  moq: number;
   stock: string;
-  leadTimeDays: number;
+  rawImage: string;
+  productUrl: string | null;
+  source: "cjdropshipping" | "aliexpress" | "fallback";
 }
 
 interface BundleResponse {
   success: boolean;
   prompt: string;
-  detectedCategory: string;
   bundleTitle: string;
+  dataSource: "live" | "fallback";
   components: BundleComponent[];
   financials: {
-    totalUnitCost: number;
     totalLandedCost: number;
     suggestedRetail: number;
     grossProfit: number;
     grossMarginPercentage: number;
   };
+  warnings: string[];
   generatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
-// Static knowledge base (no external API calls, no keys, no rate limits)
+// 1. CJ Dropshipping Integration
 // ---------------------------------------------------------------------------
 
-const SUPPLIER_POOL = [
-  { name: "Shenzhen Global Trading Co.", location: "Shenzhen, Guangdong" },
-  { name: "Ningbo Precision Manufacturing", location: "Ningbo, Zhejiang" },
-  { name: "Yiwu Supply Co.", location: "Yiwu, Zhejiang" },
-  { name: "Guangzhou Sunrise Industries", location: "Guangzhou, Guangdong" },
-  { name: "Dongguan Hardware Works", location: "Dongguan, Guangdong" },
-  { name: "Foshan United Plastics", location: "Foshan, Guangdong" },
-  { name: "Jiangsu Fortune Exports", location: "Suzhou, Jiangsu" },
-  { name: "Xiamen Harbor Trading", location: "Xiamen, Fujian" },
-  { name: "Hangzhou Bright Manufacturing", location: "Hangzhou, Zhejiang" },
-  { name: "Qingdao Ocean Supply Co.", location: "Qingdao, Shandong" },
-];
+let cachedCjToken: { token: string; expiresAt: number } | null = null;
 
-interface CategoryDefinition {
-  keywords: string[];
-  categoryLabel: string;
-  componentTemplates: string[];
-  unitCostRange: [number, number];
-  retailMultiplierRange: [number, number];
+async function getCjAccessToken(): Promise<string | null> {
+  const apiKey = process.env.CJ_API_KEY;
+  if (!apiKey) return null;
+
+  if (cachedCjToken && cachedCjToken.expiresAt > Date.now()) {
+    return cachedCjToken.token;
+  }
+
+  try {
+    const res = await fetch(
+      "https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const token: string | undefined = data?.data?.accessToken;
+    if (!token) return null;
+
+    cachedCjToken = { token, expiresAt: Date.now() + 12 * 60 * 60 * 1000 };
+    return token;
+  } catch {
+    return null;
+  }
 }
 
-const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
-  {
-    keywords: ["car", "auto", "vehicle", "detailing", "wash", "ceramic"],
-    categoryLabel: "Automotive Detailing System",
-    componentTemplates: [
-      "Ceramic Coating Spray Bottle (500ml)",
-      "Microfiber Drying Towel Set (3-Pack)",
-      "Foam Cannon Pressure Washer Attachment",
-      "Interior Dashboard UV Protectant Wipes",
-      "Wheel & Rim Detailing Brush Kit",
-      "Glass & Windshield Polishing Cloth",
-    ],
-    unitCostRange: [1.8, 6.5],
-    retailMultiplierRange: [3.2, 4.5],
-  },
-  {
-    keywords: ["dog", "cat", "pet", "puppy", "kitten", "animal"],
-    categoryLabel: "Pet Care & Accessories System",
-    componentTemplates: [
-      "Adjustable No-Pull Pet Harness",
-      "Stainless Steel Slow-Feed Bowl",
-      "Retractable Pet Leash (5m)",
-      "Grooming De-Shedding Brush",
-      "Orthopedic Memory Foam Pet Bed",
-      "Interactive Treat-Dispensing Toy",
-    ],
-    unitCostRange: [2.2, 8.0],
-    retailMultiplierRange: [3.0, 4.2],
-  },
-  {
-    keywords: ["camp", "camping", "outdoor", "hiking", "tent", "backpacking"],
-    categoryLabel: "Outdoor & Camping Gear System",
-    componentTemplates: [
-      "Compact Folding Camp Stove",
-      "Waterproof Dry Bag (20L)",
-      "LED Rechargeable Camping Lantern",
-      "Multi-Tool Carabiner Set",
-      "Insulated Double-Wall Camping Mug",
-      "Portable Camp Hammock with Straps",
-    ],
-    unitCostRange: [3.0, 9.5],
-    retailMultiplierRange: [2.8, 4.0],
-  },
-  {
-    keywords: ["coffee", "espresso", "barista", "brew", "latte"],
-    categoryLabel: "Coffee & Barista Tools System",
-    componentTemplates: [
-      "Stainless Steel Milk Frothing Pitcher",
-      "Precision Coffee Dosing Cup",
-      "Reusable Pour-Over Filter Cone",
-      "Digital Espresso Scale with Timer",
-      "Coffee Bean Storage Canister (Airtight)",
-      "Tamper & Distribution Tool Set",
-    ],
-    unitCostRange: [2.5, 7.8],
-    retailMultiplierRange: [3.0, 4.3],
-  },
-  {
-    keywords: ["kitchen", "cook", "cooking", "chef", "baking"],
-    categoryLabel: "Kitchen & Cooking Accessories",
-    componentTemplates: [
-      "Silicone Kitchen Utensil Set",
-      "Adjustable Mandoline Slicer",
-      "Digital Kitchen Scale",
-      "Non-Stick Baking Mat Set",
-      "Stainless Steel Mixing Bowl Set",
-      "Magnetic Knife Storage Strip",
-    ],
-    unitCostRange: [2.0, 7.0],
-    retailMultiplierRange: [3.0, 4.2],
-  },
-  {
-    keywords: ["fitness", "gym", "yoga", "workout", "exercise"],
-    categoryLabel: "Fitness & Wellness System",
-    componentTemplates: [
-      "Resistance Band Training Set",
-      "Non-Slip Yoga Mat (6mm)",
-      "Adjustable Foam Roller",
-      "Digital Jump Rope with Counter",
-      "Compact Ab Wheel Roller",
-      "Moisture-Wicking Grip Gloves",
-    ],
-    unitCostRange: [2.5, 8.5],
-    retailMultiplierRange: [3.0, 4.4],
-  },
-];
+async function fetchCjProducts(prompt: string): Promise<BundleComponent[]> {
+  const token = await getCjAccessToken();
+  if (!token) return [];
 
-const GENERIC_COMPONENT_SUFFIXES = [
-  "Precision Kit",
-  "Deluxe Accessory Set",
-  "Multi-Use Tool",
-  "Compact Storage Case",
-  "Pro-Grade Attachment",
-];
+  try {
+    const url = new URL("https://developers.cjdropshipping.com/api2.0/v1/product/list");
+    url.searchParams.set("productNameEn", prompt);
+    url.searchParams.set("pageNum", "1");
+    url.searchParams.set("pageSize", "3");
+
+    const res = await fetch(url.toString(), {
+      headers: { "CJ-Access-Token": token },
+      cache: "no-store",
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const list: any[] = data?.data?.list ?? [];
+
+    return list.slice(0, 3).map((item, i) => ({
+      id: `cj-${i + 1}`,
+      name: item.productNameEn ?? item.productName ?? "CJ Sourced Item",
+      supplier: "CJ Dropshipping Factory",
+      rawCost: typeof item.sellPrice === "number" ? item.sellPrice : 4.5,
+      stock: "12,000+ units",
+      rawImage: item.productImage ?? "",
+      productUrl: item.pid ? `https://cjdropshipping.com/product/${item.pid}.html` : null,
+      source: "cjdropshipping" as const,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 // ---------------------------------------------------------------------------
-// Helpers
+// 2. AliExpress Integration (via RapidAPI)
+// ---------------------------------------------------------------------------
+
+async function fetchAliExpressProducts(prompt: string): Promise<BundleComponent[]> {
+  const rapidApiKey = process.env.RAPIDAPI_KEY;
+  if (!rapidApiKey) return [];
+
+  const host = process.env.RAPIDAPI_ALIEXPRESS_HOST ?? "aliexpress-datahub.p.rapidapi.com";
+  const url = `https://${host}/item_search_2?q=${encodeURIComponent(prompt)}&page=1&sort=default`;
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "X-RapidAPI-Key": rapidApiKey,
+        "X-RapidAPI-Host": host,
+      },
+      cache: "no-store",
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const resultList: any[] = data?.result?.resultList ?? [];
+
+    return resultList.slice(0, 3).map((entry, i) => {
+      const item = entry.item ?? {};
+      const rawImage: string = item.image ?? "";
+      const imageUrl = rawImage.startsWith("//") ? `https:${rawImage}` : rawImage;
+
+      return {
+        id: `ali-${i + 1}`,
+        name: item.title ?? "AliExpress Item",
+        supplier: "AliExpress Verified Merchant",
+        rawCost: typeof item.promotionPrice === "number" ? item.promotionPrice : 3.8,
+        stock: typeof item.sales === "number" ? `${item.sales} sold` : "5,000+ units",
+        rawImage: imageUrl,
+        productUrl: item.itemUrl ?? null,
+        source: "aliexpress" as const,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Fallback Engine
 // ---------------------------------------------------------------------------
 
 function hashString(input: string): number {
@@ -175,71 +174,43 @@ function mulberry32(seed: number) {
   };
 }
 
-function randomInRange(rng: () => number, min: number, max: number): number {
-  return min + rng() * (max - min);
-}
+function buildFallbackProducts(prompt: string): BundleComponent[] {
+  const rng = mulberry32(hashString(prompt));
+  const words = prompt.replace(/[^a-zA-Z\s]/g, "").split(/\s+/).filter(Boolean);
+  const base = words.length > 0 ? words : ["Universal", "Modular", "Essential"];
 
-function pick<T>(rng: () => number, arr: T[]): T {
-  return arr[Math.floor(rng() * arr.length)];
-}
+  const FALLBACK_SUPPLIERS = [
+    "Shenzhen Global Trading Co.",
+    "Ningbo Precision Manufacturing",
+    "Yiwu Supply Co.",
+  ];
 
-function shuffleUnique<T>(rng: () => number, arr: T[], count: number): T[] {
-  const copy = [...arr];
-  const result: T[] = [];
-  while (result.length < count && copy.length > 0) {
-    const idx = Math.floor(rng() * copy.length);
-    result.push(copy.splice(idx, 1)[0]);
-  }
-  return result;
-}
-
-function detectCategory(prompt: string): CategoryDefinition | null {
-  const normalized = prompt.toLowerCase();
-  let bestMatch: { def: CategoryDefinition; score: number } | null = null;
-
-  for (const def of CATEGORY_DEFINITIONS) {
-    const score = def.keywords.reduce(
-      (acc, kw) => acc + (normalized.includes(kw) ? 1 : 0),
-      0
-    );
-    if (score > 0 && (!bestMatch || score > bestMatch.score)) {
-      bestMatch = { def, score };
-    }
-  }
-
-  return bestMatch ? bestMatch.def : null;
-}
-
-function buildGenericComponents(prompt: string, rng: () => number): string[] {
-  const words = prompt
-    .replace(/[^a-zA-Z\s]/g, "")
-    .split(/\s+/)
-    .filter((w) => w.length > 3);
-
-  const baseWords = words.length > 0 ? words : ["Universal", "Modular", "Essential"];
-
-  return Array.from({ length: 3 }, () => {
-    const word = pick(rng, baseWords);
-    const suffix = pick(rng, GENERIC_COMPONENT_SUFFIXES);
+  return Array.from({ length: 3 }, (_, i) => {
+    const word = base[Math.floor(rng() * base.length)];
     const capitalized = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    return `${capitalized} ${suffix}`;
+    return {
+      id: `sku-${i + 1}`,
+      name: `${capitalized} System Component #${i + 1}`,
+      supplier: FALLBACK_SUPPLIERS[i % FALLBACK_SUPPLIERS.length],
+      rawCost: Number((2.5 + rng() * 6).toFixed(2)),
+      stock: Math.round(1000 + rng() * 15000).toLocaleString() + " units",
+      rawImage: "",
+      productUrl: null,
+      source: "fallback" as const,
+    };
   });
 }
 
 // ---------------------------------------------------------------------------
-// Route handler
+// Route Handler
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
   let body: unknown;
-
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body." },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
   const prompt =
@@ -254,81 +225,50 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const rng = mulberry32(hashString(prompt));
+  const warnings: string[] = [];
+  let components: BundleComponent[] = [];
 
-  const matchedCategory = detectCategory(prompt);
-  const categoryLabel = matchedCategory
-    ? matchedCategory.categoryLabel
-    : "General Merchandise";
+  const [cjResult, aliResult] = await Promise.allSettled([
+    fetchCjProducts(prompt),
+    fetchAliExpressProducts(prompt),
+  ]);
 
-  const componentNames = matchedCategory
-    ? shuffleUnique(rng, matchedCategory.componentTemplates, 3)
-    : buildGenericComponents(prompt, rng);
+  if (cjResult.status === "fulfilled") {
+    components.push(...cjResult.value);
+  }
+  if (aliResult.status === "fulfilled") {
+    components.push(...aliResult.value);
+  }
 
-  const [costMin, costMax] = matchedCategory
-    ? matchedCategory.unitCostRange
-    : [2.0, 7.0];
-  const [retailMultMin, retailMultMax] = matchedCategory
-    ? matchedCategory.retailMultiplierRange
-    : [3.0, 4.0];
+  const dataSource: "live" | "fallback" = components.length > 0 ? "live" : "fallback";
 
-  const chosenSuppliers = shuffleUnique(rng, SUPPLIER_POOL, 3);
+  if (components.length === 0) {
+    if (!process.env.CJ_API_KEY && !process.env.RAPIDAPI_KEY) {
+      warnings.push("Running in Fallback Mode. Configure CJ_API_KEY or RAPIDAPI_KEY for Live Data.");
+    }
+    components = buildFallbackProducts(prompt);
+  }
 
-  const components: BundleComponent[] = componentNames.map((name, i) => {
-    const supplier = chosenSuppliers[i % chosenSuppliers.length];
-    const unitCost = Number(randomInRange(rng, costMin, costMax).toFixed(2));
-    const stockNum = Math.round(randomInRange(rng, 1000, 25000));
-    const moq = Math.round(randomInRange(rng, 50, 500));
-    const leadTimeDays = Math.round(randomInRange(rng, 12, 35));
-
-    return {
-      id: `sku-${i + 1}`,
-      name: name,
-      supplier: supplier.name,
-      supplierLocation: supplier.location,
-      rawCost: unitCost,
-      moq,
-      stock: stockNum.toLocaleString() + " units",
-      leadTimeDays,
-    };
-  });
-
-  const totalUnitCost = Number(
-    components.reduce((sum, c) => sum + c.rawCost, 0).toFixed(2)
-  );
-
-  const landedCostMultiplier = randomInRange(rng, 1.25, 1.45);
-  const landedCostPerUnit = Number(
-    (totalUnitCost * landedCostMultiplier).toFixed(2)
-  );
-
-  const retailMultiplier = randomInRange(rng, retailMultMin, retailMultMax);
-  const suggestedRetailPrice = Number(
-    (landedCostPerUnit * retailMultiplier).toFixed(2)
-  );
-
-  const grossProfitPerUnit = Number(
-    (suggestedRetailPrice - landedCostPerUnit).toFixed(2)
-  );
-  const grossMarginPercent = Number(
-    ((grossProfitPerUnit / suggestedRetailPrice) * 100).toFixed(1)
-  );
-
-  const bundleTitle = `${categoryLabel.toUpperCase()} (${components.length}-PIECE SYSTEM)`;
+  const finalComponents = components.slice(0, 3);
+  const totalRawCost = Number(finalComponents.reduce((sum, c) => sum + c.rawCost, 0).toFixed(2));
+  const totalLandedCost = Number((totalRawCost * 1.35).toFixed(2));
+  const suggestedRetail = Number((totalLandedCost * 3.5).toFixed(2));
+  const grossProfit = Number((suggestedRetail - totalLandedCost).toFixed(2));
+  const grossMarginPercentage = Number(((grossProfit / suggestedRetail) * 100).toFixed(1));
 
   const response: BundleResponse = {
     success: true,
     prompt,
-    detectedCategory: categoryLabel,
-    bundleTitle,
-    components,
+    bundleTitle: `BUILD A 3-PIECE SYSTEM FOR: "${prompt.toUpperCase()}"`,
+    dataSource,
+    components: finalComponents,
     financials: {
-      totalUnitCost,
-      totalLandedCost: landedCostPerUnit,
-      suggestedRetail: suggestedRetailPrice,
-      grossProfit: grossProfitPerUnit,
-      grossMarginPercentage: grossMarginPercent,
+      totalLandedCost,
+      suggestedRetail,
+      grossProfit,
+      grossMarginPercentage,
     },
+    warnings,
     generatedAt: new Date().toISOString(),
   };
 
