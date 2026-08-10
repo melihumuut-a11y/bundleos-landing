@@ -93,7 +93,93 @@ async function getCjAccessToken(): Promise<string> {
   return token;
 }
 
-async function fetchCjProducts(prompt: string): Promise<NormalizedProduct[]> {
+// Get the first variant id (vid) for a product — required by both the
+// stock and freight-calculate endpoints, which key off vid, not pid.
+async function getFirstVariantId(
+  token: string,
+  pid: string
+): Promise<string | null> {
+  const url = new URL(
+    "https://developers.cjdropshipping.com/api2.0/v1/product/variant/query"
+  );
+  url.searchParams.set("pid", pid);
+
+  const res = await fetch(url.toString(), {
+    headers: { "CJ-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  const variants: any[] = Array.isArray(data?.data) ? data.data : [];
+  return variants[0]?.vid ?? null;
+}
+
+// Real warehouse stock for a variant — sums storageNum across all
+// warehouse areas CJ returns (China warehouse, overseas warehouses, etc.).
+async function getVariantStock(token: string, vid: string): Promise<number | null> {
+  const url = new URL(
+    "https://developers.cjdropshipping.com/api2.0/v1/product/stock/queryByVid"
+  );
+  url.searchParams.set("vid", vid);
+
+  const res = await fetch(url.toString(), {
+    headers: { "CJ-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  const rows: any[] = Array.isArray(data?.data) ? data.data : [];
+  if (rows.length === 0) return null;
+
+  return rows.reduce(
+    (sum, row) => sum + (typeof row.storageNum === "number" ? row.storageNum : 0),
+    0
+  );
+}
+
+// Real shipping quote for a variant to a destination country. Returns the
+// cheapest logistics option CJ offers for qty=1.
+async function getVariantShippingCost(
+  token: string,
+  vid: string,
+  destinationCountry: string
+): Promise<number | null> {
+  const res = await fetch(
+    "https://developers.cjdropshipping.com/api2.0/v1/logistic/freightCalculate",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CJ-Access-Token": token,
+      },
+      body: JSON.stringify({
+        startCountryCode: "CN",
+        endCountryCode: destinationCountry,
+        products: [{ quantity: 1, vid }],
+      }),
+      cache: "no-store",
+    }
+  );
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  const options: any[] = Array.isArray(data?.data) ? data.data : [];
+  if (options.length === 0) return null;
+
+  const cheapest = options.reduce((min, opt) =>
+    typeof opt.logisticPrice === "number" && opt.logisticPrice < min.logisticPrice
+      ? opt
+      : min
+  );
+  return typeof cheapest.logisticPrice === "number" ? cheapest.logisticPrice : null;
+}
+
+async function fetchCjProducts(
+  prompt: string,
+  destinationCountry: string
+): Promise<NormalizedProduct[]> {
   const token = await getCjAccessToken();
 
   const url = new URL(
@@ -115,19 +201,47 @@ async function fetchCjProducts(prompt: string): Promise<NormalizedProduct[]> {
   const data = await res.json();
   const list: any[] = data?.data?.list ?? [];
 
-  return list.slice(0, 3).map((item) => ({
-    source: "cjdropshipping" as const,
-    title: item.productNameEn ?? item.productName ?? "Unknown product",
-    imageUrl: item.productImage ?? "",
-    factoryPrice: typeof item.sellPrice === "number" ? item.sellPrice : null,
-    currency: "USD",
-    shippingCost: null, // requires a separate freight-calculation call (pid + destination country)
-    stock: null, // requires a separate /product/stock/queryByVid call
-    supplierName: "CJ Dropshipping Warehouse",
-    productUrl: item.pid
-      ? `https://cjdropshipping.com/product/${item.pid}.html`
-      : null,
-  }));
+  // Enrich each product with real stock + real shipping cost. Done in
+  // parallel per product; each product's own variant/stock/freight calls
+  // are sequential (freight needs the vid that variant/query returns).
+  const enriched = await Promise.all(
+    list.slice(0, 3).map(async (item) => {
+      let stock: number | null = null;
+      let shippingCost: number | null = null;
+
+      try {
+        const vid = await getFirstVariantId(token, item.pid);
+        if (vid) {
+          const [stockResult, shippingResult] = await Promise.allSettled([
+            getVariantStock(token, vid),
+            getVariantShippingCost(token, vid, destinationCountry),
+          ]);
+          stock = stockResult.status === "fulfilled" ? stockResult.value : null;
+          shippingCost =
+            shippingResult.status === "fulfilled" ? shippingResult.value : null;
+        }
+      } catch {
+        // Stock/shipping enrichment failing shouldn't drop the product —
+        // it just falls back to null for those two fields.
+      }
+
+      return {
+        source: "cjdropshipping" as const,
+        title: item.productNameEn ?? item.productName ?? "Unknown product",
+        imageUrl: item.productImage ?? "",
+        factoryPrice: typeof item.sellPrice === "number" ? item.sellPrice : null,
+        currency: "USD",
+        shippingCost,
+        stock,
+        supplierName: "CJ Dropshipping Warehouse",
+        productUrl: item.pid
+          ? `https://cjdropshipping.com/product/${item.pid}.html`
+          : null,
+      };
+    })
+  );
+
+  return enriched;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +424,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Optional: which country to quote CJ shipping to. Defaults to US.
+  const destinationCountry =
+    typeof (body as { destinationCountry?: unknown })?.destinationCountry ===
+    "string"
+      ? (body as { destinationCountry: string }).destinationCountry.toUpperCase()
+      : "US";
+
   const warnings: string[] = [];
   const platformStatus: Record<string, "ok" | "skipped_no_key" | "failed"> = {
     cjdropshipping: "skipped_no_key",
@@ -333,7 +454,7 @@ export async function POST(request: NextRequest) {
   const taskNames: Array<keyof typeof platformStatus> = [];
 
   if (process.env.CJ_API_KEY) {
-    tasks.push(fetchCjProducts(prompt));
+    tasks.push(fetchCjProducts(prompt, destinationCountry));
     taskNames.push("cjdropshipping");
   }
   if (process.env.RAPIDAPI_KEY) {
