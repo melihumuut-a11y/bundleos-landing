@@ -141,11 +141,11 @@ export default function Home() {
         </div>
 
         {/* WHY SINGLE-ITEM DROPSHIPPING IS DEAD */}
-        <div style={{ textCenter: 'center', marginBottom: '60px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '60px' }}>
           <h2 style={{ fontSize: '28px', fontWeight: 'bold', textAlign: 'center', marginBottom: '32px' }}>
             Why Single-Item Dropshipping Is Dead
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', textAlign: 'left' }}>
             
             {/* OLD WAY */}
             <div style={{ background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '16px', padding: '28px' }}>
@@ -177,7 +177,7 @@ export default function Home() {
         </div>
 
         {/* CONSOLE TERMINAL (LIVE AI APP) */}
-        <div style={{ background: '#0D111A', border: '1px solid #1E2638', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
+        <div style={{ background: '#0D111A', border: '1px solid #1E2638', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)', textAlign: 'left' }}>
           
           {/* MAC TERMINAL DOTS */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #1A2130', paddingBottom: '12px' }}>
