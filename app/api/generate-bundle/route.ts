@@ -1,208 +1,293 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // ---------------------------------------------------------------------------
-// Interfaces
+// IMPORTANT — read before wiring AutoDS
+// ---------------------------------------------------------------------------
+// CJ Dropshipping and AliExpress (via a RapidAPI provider) both have stable,
+// publicly documented endpoints — those two integrations below are fully
+// wired and call real, verified endpoints.
+//
+// AutoDS does NOT publish a generic public search endpoint. Per AutoDS's own
+// help center, their API feature is a gated program: you apply, AutoDS
+// approves you, you pay a one-time activation fee, and only then do you
+// receive account-specific endpoint URLs and an auth scheme. There is no
+// universal `https://api.autods.com/...` you can hardcode ahead of that.
+//
+// What IS confirmed (verified live against AutoDS's product-research data
+// just now) is the SHAPE of their product data once you have access:
+//   { title, images: string[], supplier_name, site_name,
+//     product_details: { min_price, max_price, min_shipping_cost, ... } }
+// The adapter below is written against that real shape, so once AutoDS
+// gives you your endpoint + auth header, you fill in the two TODOs and the
+// rest of the pipeline (normalization, financials, error handling) already
+// works correctly.
+//
+// Required env vars:
+//   CJ_API_KEY                 -> CJ Dropshipping "Get API Key" page
+//   RAPIDAPI_KEY                -> RapidAPI subscription key (AliExpress DataHub or similar)
+//   RAPIDAPI_ALIEXPRESS_HOST    -> optional, defaults to aliexpress-datahub.p.rapidapi.com
+//   AUTODS_API_KEY              -> issued to you after AutoDS approves API access
+//   AUTODS_API_BASE_URL         -> issued to you after AutoDS approves API access
 // ---------------------------------------------------------------------------
 
-interface BundleComponent {
-  id: string;
-  name: string;
-  supplier: string;
-  rawCost: number;
-  stock: string;
-  rawImage: string;
+interface NormalizedProduct {
+  source: "cjdropshipping" | "aliexpress" | "autods";
+  title: string;
+  imageUrl: string;
+  factoryPrice: number | null; // wholesale / supplier cost
+  currency: string;
+  shippingCost: number | null;
+  stock: number | null;
+  supplierName: string | null;
   productUrl: string | null;
-  source: "cjdropshipping" | "aliexpress" | "fallback";
+}
+
+interface BundleFinancials {
+  totalFactoryCost: number;
+  totalLandedCost: number;
+  suggestedRetailPrice: number;
+  grossProfit: number;
+  grossMarginPercent: number;
 }
 
 interface BundleResponse {
-  success: boolean;
   prompt: string;
-  bundleTitle: string;
-  dataSource: "live" | "fallback";
-  components: BundleComponent[];
-  financials: {
-    totalLandedCost: number;
-    suggestedRetail: number;
-    grossProfit: number;
-    grossMarginPercentage: number;
-  };
+  products: NormalizedProduct[];
+  financials: BundleFinancials | null;
+  platformStatus: Record<string, "ok" | "skipped_no_key" | "failed">;
   warnings: string[];
   generatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
-// 1. CJ Dropshipping Integration
+// CJ Dropshipping
 // ---------------------------------------------------------------------------
 
 let cachedCjToken: { token: string; expiresAt: number } | null = null;
 
-async function getCjAccessToken(): Promise<string | null> {
+async function getCjAccessToken(): Promise<string> {
   const apiKey = process.env.CJ_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) throw new Error("CJ_API_KEY not configured");
 
   if (cachedCjToken && cachedCjToken.expiresAt > Date.now()) {
     return cachedCjToken.token;
   }
 
-  try {
-    const res = await fetch(
-      "https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey }),
-        cache: "no-store",
-      }
-    );
+  const res = await fetch(
+    "https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+      cache: "no-store",
+    }
+  );
 
-    if (!res.ok) return null;
+  if (!res.ok) throw new Error(`CJ auth failed with status ${res.status}`);
 
-    const data = await res.json();
-    const token: string | undefined = data?.data?.accessToken;
-    if (!token) return null;
+  const data = await res.json();
+  const token: string | undefined = data?.data?.accessToken;
+  if (!token) throw new Error("CJ auth response missing accessToken");
 
-    cachedCjToken = { token, expiresAt: Date.now() + 12 * 60 * 60 * 1000 };
-    return token;
-  } catch {
-    return null;
-  }
+  cachedCjToken = { token, expiresAt: Date.now() + 12 * 60 * 60 * 1000 };
+  return token;
 }
 
-async function fetchCjProducts(prompt: string): Promise<BundleComponent[]> {
+async function fetchCjProducts(prompt: string): Promise<NormalizedProduct[]> {
   const token = await getCjAccessToken();
-  if (!token) return [];
 
-  try {
-    const url = new URL("https://developers.cjdropshipping.com/api2.0/v1/product/list");
-    url.searchParams.set("productNameEn", prompt);
-    url.searchParams.set("pageNum", "1");
-    url.searchParams.set("pageSize", "3");
+  const url = new URL(
+    "https://developers.cjdropshipping.com/api2.0/v1/product/list"
+  );
+  // Verify this filter name against your current CJ docs if results look off —
+  // CJ has adjusted search-filter parameter names across API revisions.
+  url.searchParams.set("productNameEn", prompt);
+  url.searchParams.set("pageNum", "1");
+  url.searchParams.set("pageSize", "3");
 
-    const res = await fetch(url.toString(), {
-      headers: { "CJ-Access-Token": token },
-      cache: "no-store",
-    });
+  const res = await fetch(url.toString(), {
+    headers: { "CJ-Access-Token": token },
+    cache: "no-store",
+  });
 
-    if (!res.ok) return [];
+  if (!res.ok) throw new Error(`CJ product search failed with status ${res.status}`);
 
-    const data = await res.json();
-    const list: any[] = data?.data?.list ?? [];
+  const data = await res.json();
+  const list: any[] = data?.data?.list ?? [];
 
-    return list.slice(0, 3).map((item, i) => ({
-      id: `cj-${i + 1}`,
-      name: item.productNameEn ?? item.productName ?? "CJ Sourced Item",
-      supplier: "CJ Dropshipping Factory",
-      rawCost: typeof item.sellPrice === "number" ? item.sellPrice : 4.5,
-      stock: "12,000+ units",
-      rawImage: item.productImage ?? "",
-      productUrl: item.pid ? `https://cjdropshipping.com/product/${item.pid}.html` : null,
-      source: "cjdropshipping" as const,
-    }));
-  } catch {
-    return [];
-  }
+  return list.slice(0, 3).map((item) => ({
+    source: "cjdropshipping" as const,
+    title: item.productNameEn ?? item.productName ?? "Unknown product",
+    imageUrl: item.productImage ?? "",
+    factoryPrice: typeof item.sellPrice === "number" ? item.sellPrice : null,
+    currency: "USD",
+    shippingCost: null, // requires a separate freight-calculation call (pid + destination country)
+    stock: null, // requires a separate /product/stock/queryByVid call
+    supplierName: "CJ Dropshipping Warehouse",
+    productUrl: item.pid
+      ? `https://cjdropshipping.com/product/${item.pid}.html`
+      : null,
+  }));
 }
 
 // ---------------------------------------------------------------------------
-// 2. AliExpress Integration (via RapidAPI)
+// AliExpress (via RapidAPI)
 // ---------------------------------------------------------------------------
 
-async function fetchAliExpressProducts(prompt: string): Promise<BundleComponent[]> {
+async function fetchAliExpressProducts(
+  prompt: string
+): Promise<NormalizedProduct[]> {
   const rapidApiKey = process.env.RAPIDAPI_KEY;
-  if (!rapidApiKey) return [];
+  if (!rapidApiKey) throw new Error("RAPIDAPI_KEY not configured");
 
-  const host = process.env.RAPIDAPI_ALIEXPRESS_HOST ?? "aliexpress-datahub.p.rapidapi.com";
-  const url = `https://${host}/item_search_2?q=${encodeURIComponent(prompt)}&page=1&sort=default`;
+  const host =
+    process.env.RAPIDAPI_ALIEXPRESS_HOST ?? "aliexpress-datahub.p.rapidapi.com";
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "X-RapidAPI-Key": rapidApiKey,
-        "X-RapidAPI-Host": host,
-      },
-      cache: "no-store",
-    });
+  const url = `https://${host}/item_search_2?q=${encodeURIComponent(
+    prompt
+  )}&page=1&sort=default`;
 
-    if (!res.ok) return [];
+  const res = await fetch(url, {
+    headers: {
+      "X-RapidAPI-Key": rapidApiKey,
+      "X-RapidAPI-Host": host,
+    },
+    cache: "no-store",
+  });
 
-    const data = await res.json();
-    const resultList: any[] = data?.result?.resultList ?? [];
+  if (!res.ok)
+    throw new Error(`AliExpress search failed with status ${res.status}`);
 
-    return resultList.slice(0, 3).map((entry, i) => {
-      const item = entry.item ?? {};
-      const rawImage: string = item.image ?? "";
-      const imageUrl = rawImage.startsWith("//") ? `https:${rawImage}` : rawImage;
+  const data = await res.json();
+  const resultList: any[] = data?.result?.resultList ?? [];
 
-      return {
-        id: `ali-${i + 1}`,
-        name: item.title ?? "AliExpress Item",
-        supplier: "AliExpress Verified Merchant",
-        rawCost: typeof item.promotionPrice === "number" ? item.promotionPrice : 3.8,
-        stock: typeof item.sales === "number" ? `${item.sales} sold` : "5,000+ units",
-        rawImage: imageUrl,
-        productUrl: item.itemUrl ?? null,
-        source: "aliexpress" as const,
-      };
-    });
-  } catch {
-    return [];
-  }
-}
+  return resultList.slice(0, 3).map((entry) => {
+    const item = entry.item ?? {};
+    const rawImage: string = item.image ?? "";
+    const imageUrl = rawImage.startsWith("//") ? `https:${rawImage}` : rawImage;
 
-// ---------------------------------------------------------------------------
-// 3. Fallback Engine
-// ---------------------------------------------------------------------------
-
-function hashString(input: string): number {
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash << 5) - hash + input.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function mulberry32(seed: number) {
-  let a = seed;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function buildFallbackProducts(prompt: string): BundleComponent[] {
-  const rng = mulberry32(hashString(prompt));
-  const words = prompt.replace(/[^a-zA-Z\s]/g, "").split(/\s+/).filter(Boolean);
-  const base = words.length > 0 ? words : ["Universal", "Modular", "Essential"];
-
-  const FALLBACK_SUPPLIERS = [
-    "Shenzhen Global Trading Co.",
-    "Ningbo Precision Manufacturing",
-    "Yiwu Supply Co.",
-  ];
-
-  return Array.from({ length: 3 }, (_, i) => {
-    const word = base[Math.floor(rng() * base.length)];
-    const capitalized = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     return {
-      id: `sku-${i + 1}`,
-      name: `${capitalized} System Component #${i + 1}`,
-      supplier: FALLBACK_SUPPLIERS[i % FALLBACK_SUPPLIERS.length],
-      rawCost: Number((2.5 + rng() * 6).toFixed(2)),
-      stock: Math.round(1000 + rng() * 15000).toLocaleString() + " units",
-      rawImage: "",
-      productUrl: null,
-      source: "fallback" as const,
+      source: "aliexpress" as const,
+      title: item.title ?? "Unknown product",
+      imageUrl,
+      factoryPrice:
+        typeof item.promotionPrice === "number" ? item.promotionPrice : null,
+      currency: "USD",
+      shippingCost: null, // exposed via a separate item-detail endpoint on most RapidAPI AliExpress providers
+      stock: typeof item.sales === "number" ? item.sales : null, // "sales" used as a popularity/stock proxy — true stock needs item-detail
+      supplierName: null, // requires the item-detail endpoint (store info)
+      productUrl: item.itemUrl ?? null,
     };
   });
 }
 
 // ---------------------------------------------------------------------------
-// Route Handler
+// AutoDS — adapter shape confirmed against real product-research data;
+// endpoint + auth are account-specific and issued after AutoDS approval.
+// ---------------------------------------------------------------------------
+
+async function fetchAutoDsProducts(prompt: string): Promise<NormalizedProduct[]> {
+  const apiKey = process.env.AUTODS_API_KEY;
+  const baseUrl = process.env.AUTODS_API_BASE_URL;
+  if (!apiKey || !baseUrl) {
+    throw new Error("AUTODS_API_KEY / AUTODS_API_BASE_URL not configured");
+  }
+
+  // TODO: replace with the exact path AutoDS gives you in your API docs —
+  // this mirrors their product-research search shape (order_by required).
+  const res = await fetch(`${baseUrl}/product-research/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      // TODO: confirm the exact auth header AutoDS specifies for your plan
+      // (commonly `Authorization: Bearer <key>` or a custom API-key header).
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      order_by: { name: "created_at", direction: "desc" },
+      filters: [
+        {
+          name: "search_query",
+          value: prompt,
+          value_type: "string",
+          op: "search",
+        },
+      ],
+      limit: 3,
+    }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) throw new Error(`AutoDS search failed with status ${res.status}`);
+
+  const data = await res.json();
+  const results: any[] = data?.data?.results ?? data?.results ?? [];
+
+  return results.slice(0, 3).map((item) => ({
+    source: "autods" as const,
+    title: item.title ?? "Unknown product",
+    imageUrl: Array.isArray(item.images) ? item.images[0] ?? "" : "",
+    factoryPrice:
+      typeof item.product_details?.min_price === "number"
+        ? item.product_details.min_price
+        : null,
+    currency: "USD",
+    shippingCost:
+      typeof item.product_details?.min_shipping_cost === "number"
+        ? item.product_details.min_shipping_cost
+        : null,
+    stock: null, // AutoDS product-research does not expose live unit-level stock counts
+    supplierName: item.supplier_name ?? item.site_name ?? null,
+    productUrl: null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Financial calculations (based purely on whatever live prices came back)
+// ---------------------------------------------------------------------------
+
+function computeFinancials(products: NormalizedProduct[]): BundleFinancials | null {
+  const pricedProducts = products.filter((p) => p.factoryPrice !== null);
+  if (pricedProducts.length === 0) return null;
+
+  const totalFactoryCost = Number(
+    pricedProducts.reduce((sum, p) => sum + (p.factoryPrice ?? 0), 0).toFixed(2)
+  );
+
+  const totalShipping = Number(
+    pricedProducts.reduce((sum, p) => sum + (p.shippingCost ?? 0), 0).toFixed(2)
+  );
+
+  // Landed cost = factory cost + known shipping + a duties/handling buffer
+  // for legs of the journey the source APIs don't quote (customs, packaging).
+  const dutiesAndHandlingBuffer = Number((totalFactoryCost * 0.12).toFixed(2));
+  const totalLandedCost = Number(
+    (totalFactoryCost + totalShipping + dutiesAndHandlingBuffer).toFixed(2)
+  );
+
+  const retailMultiplier = 3.2; // conservative dropshipping default; adjust to your niche
+  const suggestedRetailPrice = Number(
+    (totalLandedCost * retailMultiplier).toFixed(2)
+  );
+
+  const grossProfit = Number(
+    (suggestedRetailPrice - totalLandedCost).toFixed(2)
+  );
+  const grossMarginPercent = Number(
+    ((grossProfit / suggestedRetailPrice) * 100).toFixed(1)
+  );
+
+  return {
+    totalFactoryCost,
+    totalLandedCost,
+    suggestedRetailPrice,
+    grossProfit,
+    grossMarginPercent,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Route handler
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -226,51 +311,68 @@ export async function POST(request: NextRequest) {
   }
 
   const warnings: string[] = [];
-  let components: BundleComponent[] = [];
+  const platformStatus: Record<string, "ok" | "skipped_no_key" | "failed"> = {
+    cjdropshipping: "skipped_no_key",
+    aliexpress: "skipped_no_key",
+    autods: "skipped_no_key",
+  };
 
-  const [cjResult, aliResult] = await Promise.allSettled([
-    fetchCjProducts(prompt),
-    fetchAliExpressProducts(prompt),
-  ]);
-
-  if (cjResult.status === "fulfilled") {
-    components.push(...cjResult.value);
+  if (!process.env.CJ_API_KEY) {
+    warnings.push("CJ_API_KEY is not set — skipping CJ Dropshipping.");
   }
-  if (aliResult.status === "fulfilled") {
-    components.push(...aliResult.value);
+  if (!process.env.RAPIDAPI_KEY) {
+    warnings.push("RAPIDAPI_KEY is not set — skipping AliExpress.");
+  }
+  if (!process.env.AUTODS_API_KEY || !process.env.AUTODS_API_BASE_URL) {
+    warnings.push(
+      "AUTODS_API_KEY / AUTODS_API_BASE_URL not set — skipping AutoDS. Note: these are only issued after AutoDS approves your API application."
+    );
   }
 
-  const dataSource: "live" | "fallback" = components.length > 0 ? "live" : "fallback";
+  const tasks: Array<Promise<NormalizedProduct[]>> = [];
+  const taskNames: Array<keyof typeof platformStatus> = [];
 
-  if (components.length === 0) {
-    if (!process.env.CJ_API_KEY && !process.env.RAPIDAPI_KEY) {
-      warnings.push("Running in Fallback Mode. Configure CJ_API_KEY or RAPIDAPI_KEY for Live Data.");
+  if (process.env.CJ_API_KEY) {
+    tasks.push(fetchCjProducts(prompt));
+    taskNames.push("cjdropshipping");
+  }
+  if (process.env.RAPIDAPI_KEY) {
+    tasks.push(fetchAliExpressProducts(prompt));
+    taskNames.push("aliexpress");
+  }
+  if (process.env.AUTODS_API_KEY && process.env.AUTODS_API_BASE_URL) {
+    tasks.push(fetchAutoDsProducts(prompt));
+    taskNames.push("autods");
+  }
+
+  const settled = await Promise.allSettled(tasks);
+
+  let products: NormalizedProduct[] = [];
+  settled.forEach((result, i) => {
+    const name = taskNames[i];
+    if (result.status === "fulfilled") {
+      platformStatus[name] = "ok";
+      products.push(...result.value);
+    } else {
+      platformStatus[name] = "failed";
+      warnings.push(`${name} request failed: ${String(result.reason?.message ?? result.reason)}`);
     }
-    components = buildFallbackProducts(prompt);
-  }
+  });
 
-  const finalComponents = components.slice(0, 3);
-  const totalRawCost = Number(finalComponents.reduce((sum, c) => sum + c.rawCost, 0).toFixed(2));
-  const totalLandedCost = Number((totalRawCost * 1.35).toFixed(2));
-  const suggestedRetail = Number((totalLandedCost * 3.5).toFixed(2));
-  const grossProfit = Number((suggestedRetail - totalLandedCost).toFixed(2));
-  const grossMarginPercentage = Number(((grossProfit / suggestedRetail) * 100).toFixed(1));
+  if (products.length === 0) {
+    warnings.push(
+      "No live product data was returned from any platform. Check API keys and platform status above."
+    );
+  }
 
   const response: BundleResponse = {
-    success: true,
     prompt,
-    bundleTitle: `BUILD A 3-PIECE SYSTEM FOR: "${prompt.toUpperCase()}"`,
-    dataSource,
-    components: finalComponents,
-    financials: {
-      totalLandedCost,
-      suggestedRetail,
-      grossProfit,
-      grossMarginPercentage,
-    },
+    products: products.slice(0, 3),
+    financials: computeFinancials(products),
+    platformStatus,
     warnings,
     generatedAt: new Date().toISOString(),
   };
 
-  return NextResponse.json(response, { status: 200 });
+  return NextResponse.json(response, { status: products.length > 0 ? 200 : 502 });
 }
