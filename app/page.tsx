@@ -8,7 +8,9 @@ export default function Dashboard() {
   const [bundleData, setBundleData] = useState<any>(null);
   const [processingImages, setProcessingImages] = useState(false);
   const [studioResult, setStudioResult] = useState<any>(null);
+  const [pushingShopify, setPushingShopify] = useState(false);
 
+  // 1. AI Sourcing
   const handleSource = async (e: any) => {
     e.preventDefault();
     setLoading(true);
@@ -30,6 +32,7 @@ export default function Dashboard() {
     setLoading(false);
   };
 
+  // 2. AI Visual Studio
   const handleProcessStudio = async () => {
     if (!bundleData) return;
     setProcessingImages(true);
@@ -50,6 +53,27 @@ export default function Dashboard() {
     setProcessingImages(false);
   };
 
+  // 3. Push to Shopify
+  const handlePushShopify = async () => {
+    if (!bundleData) return;
+    setPushingShopify(true);
+
+    try {
+      const res = await fetch('/api/push-to-shopify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bundleData }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('🚀 SUCCESS! ' + bundleData.bundleTitle + ' is now live on your Shopify store as a Virtual SKU!');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setPushingShopify(false);
+  };
+
   return (
     <div style={{ background: '#07080C', color: '#F9FAFB', minHeight: '100vh', padding: '40px 8%', fontFamily: 'sans-serif' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '40px', alignItems: 'center' }}>
@@ -57,7 +81,7 @@ export default function Dashboard() {
           BundleOS Core v3.0
         </h1>
         <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-          ● Real Engine Active
+          ● Live Engine Connected
         </span>
       </header>
 
@@ -76,7 +100,16 @@ export default function Dashboard() {
 
       {bundleData && (
         <div style={{ background: '#10131E', border: '1px solid #1E2330', borderRadius: '16px', padding: '30px' }}>
-          <h2 style={{ fontSize: '20px', marginBottom: '20px', color: '#60A5FA' }}>{bundleData.bundleTitle}</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ fontSize: '20px', color: '#60A5FA' }}>{bundleData.bundleTitle}</h2>
+            <button
+              onClick={handlePushShopify}
+              type="button"
+              style={{ background: '#10B981', color: 'black', padding: '12px 20px', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
+            >
+              {pushingShopify ? 'Pushing...' : '🛍️ Push Bundle to Shopify →'}
+            </button>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '30px' }}>
             {bundleData.components.map((c: any) => (
